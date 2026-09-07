@@ -66,9 +66,9 @@
                                 {{ $product->status->label() }}
                             </span>
                         </td>
-                        <td class="px-4 py-3 text-right text-sm space-x-2">
-                            <a href="{{ route('products.edit', $product) }}" wire:navigate
-                               class="text-blue-600 hover:text-blue-800 font-medium">Editar</a>
+                        <td class="px-4 py-3 text-right text-sm font-medium space-x-2">
+                            <a href="{{ route('recipes.manager', $product->id) }}" wire:navigate class="text-green-600 hover:text-green-900">Receta</a>
+                            <a href="{{ route('products.edit', $product->id) }}" wire:navigate class="text-blue-600 hover:text-blue-900">Editar</a>
                             <button wire:click="delete({{ $product->id }})"
                                     wire:confirm="¿Estás seguro de eliminar '{{ $product->name }}'?"
                                     class="text-red-600 hover:text-red-800 font-medium">Eliminar</button>

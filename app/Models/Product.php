@@ -58,6 +58,11 @@ class Product extends Model
         return $this->hasMany(ProductPresentation::class);
     }
 
+    public function recipe(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(Recipe::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === ProductStatus::Active;

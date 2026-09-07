@@ -28,6 +28,7 @@ class User extends Authenticatable
         'password',
         'role',
         'status',
+        'telegram_chat_id',
     ];
 
     /**
@@ -73,5 +74,10 @@ class User extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === UserStatus::Active;
+    }
+
+    public function aiConversation()
+    {
+        return $this->hasOne(AiConversation::class);
     }
 }
