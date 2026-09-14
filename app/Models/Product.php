@@ -63,6 +63,11 @@ class Product extends Model
         return $this->hasOne(Recipe::class);
     }
 
+    public function stocks(): HasMany
+    {
+        return $this->hasMany(Stock::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === ProductStatus::Active;
