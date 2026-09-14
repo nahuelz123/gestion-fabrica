@@ -10,16 +10,20 @@ class UnitSeeder extends Seeder
 {
     public function run(): void
     {
-        Unit::create([
-            'name' => 'Unidad',
-            'abbreviation' => 'u',
-            'type' => UnitType::Count,
-        ]);
+        Unit::updateOrCreate(
+            ['abbreviation' => 'u'],
+            [
+                'name' => 'Unidad',
+                'type' => UnitType::Count,
+            ]
+        );
 
-        Unit::create([
-            'name' => 'Kilogramo',
-            'abbreviation' => 'kg',
-            'type' => UnitType::Weight,
-        ]);
+        Unit::updateOrCreate(
+            ['abbreviation' => 'kg'],
+            [
+                'name' => 'Kilogramo',
+                'type' => UnitType::Weight,
+            ]
+        );
     }
 }

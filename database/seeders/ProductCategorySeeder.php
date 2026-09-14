@@ -12,8 +12,8 @@ class ProductCategorySeeder extends Seeder
     {
         $company = Company::first();
 
-        ProductCategory::create(['company_id' => $company->id, 'name' => 'Materia Prima']);
-        ProductCategory::create(['company_id' => $company->id, 'name' => 'Producto Terminado']);
-        ProductCategory::create(['company_id' => $company->id, 'name' => 'Insumos']);
+        ProductCategory::updateOrCreate(['company_id' => $company->id, 'name' => 'Materia Prima']);
+        ProductCategory::updateOrCreate(['company_id' => $company->id, 'name' => 'Producto Terminado']);
+        ProductCategory::updateOrCreate(['company_id' => $company->id, 'name' => 'Insumos']);
     }
 }

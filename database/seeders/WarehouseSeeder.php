@@ -13,18 +13,20 @@ class WarehouseSeeder extends Seeder
     {
         $company = Company::first();
 
-        Warehouse::create([
-            'company_id' => $company->id,
-            'name' => 'Depósito Principal',
-            'type' => WarehouseType::Main,
-            'address' => 'Fábrica Central',
-        ]);
+        Warehouse::updateOrCreate(
+            ['company_id' => $company->id, 'name' => 'Depósito Principal'],
+            [
+                'type' => WarehouseType::Main,
+                'address' => 'Fábrica Central',
+            ]
+        );
         
-        Warehouse::create([
-            'company_id' => $company->id,
-            'name' => 'Cámara de Producción',
-            'type' => WarehouseType::Production,
-            'address' => 'Sector Producción',
-        ]);
+        Warehouse::updateOrCreate(
+            ['company_id' => $company->id, 'name' => 'Cámara de Producción'],
+            [
+                'type' => WarehouseType::Production,
+                'address' => 'Sector Producción',
+            ]
+        );
     }
 }
