@@ -1,0 +1,7 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+# Solo migraciones — NUNCA --seed en producción.
+# El seed es una operación manual de una sola vez, no de cada deploy.
+startCommand = "php artisan config:cache && php artisan route:cache && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT"
