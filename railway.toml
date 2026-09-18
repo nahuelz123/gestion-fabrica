@@ -1,6 +1,3 @@
-[build]
-builder = "nixpacks"
-
 [deploy]
 # Solo migraciones — NUNCA --seed en producción.
 # El seed es una operación manual de una sola vez, no de cada deploy.
