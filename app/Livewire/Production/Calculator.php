@@ -5,6 +5,7 @@ namespace App\Livewire\Production;
 use App\Models\Product;
 use App\Services\ProductionCalculatorService;
 use Exception;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -45,6 +46,8 @@ class Calculator extends Component
 
     public function confirm(ProductionService $productionService)
     {
+        Gate::authorize('owner-only');
+
         $this->validate([
             'warehouse_id' => 'required|exists:warehouses,id',
         ]);

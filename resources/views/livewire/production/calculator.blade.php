@@ -96,8 +96,9 @@
                     </table>
                 </div>
 
-                <!-- SECCIÓN DE CONFIRMACIÓN (Solo si alcanza el stock) -->
+                <!-- SECCIÓN DE CONFIRMACIÓN (Solo si alcanza el stock y el usuario es owner) -->
                 @if ($result['can_produce'])
+                    @can('owner-only')
                     @php 
                         $selectedProduct = $products->firstWhere('id', $product_id);
                     @endphp
@@ -142,6 +143,7 @@
                             </button>
                         </div>
                     </div>
+                    @endcan
                 @endif
             @else
                 <div class="h-full flex flex-col items-center justify-center p-12 text-gray-400 bg-gray-50 rounded-lg border border-dashed border-gray-300">

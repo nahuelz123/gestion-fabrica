@@ -3,6 +3,7 @@
 namespace App\Livewire\Purchases;
 
 use App\Models\Purchase;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -10,6 +11,12 @@ use Livewire\Component;
 class Index extends Component
 {
     public string $search = '';
+
+    public function mount(): void
+    {
+        Gate::authorize('owner-only');
+    }
+
 
     public function render()
     {

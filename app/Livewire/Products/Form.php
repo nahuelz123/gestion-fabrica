@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\ProductPresentation;
 use App\Models\Unit;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -39,6 +40,8 @@ class Form extends Component
 
     public function mount(?int $id = null): void
     {
+        Gate::authorize('owner-only');
+
         if ($id) {
             $product = Product::with('presentations')->findOrFail($id);
             $this->productId = $product->id;

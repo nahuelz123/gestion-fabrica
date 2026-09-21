@@ -3,6 +3,7 @@
 namespace App\Livewire\Suppliers;
 
 use App\Models\Supplier;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -20,6 +21,8 @@ class Form extends Component
 
     public function mount($id = null)
     {
+        Gate::authorize('owner-only');
+
         if ($id) {
             $this->supplier = Supplier::where('company_id', auth()->user()->company_id)->findOrFail($id);
             $this->name = $this->supplier->name;

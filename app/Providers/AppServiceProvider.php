@@ -29,5 +29,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('manage-users', function (User $user) {
             return $user->isOwner();
         });
+
+        // Restringe pantallas y acciones exclusivas del dueño (Productos, Proveedores, Compras, Recetas, Confirmar Producción)
+        Gate::define('owner-only', function (User $user) {
+            return $user->isOwner();
+        });
     }
 }

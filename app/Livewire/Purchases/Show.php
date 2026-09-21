@@ -6,6 +6,7 @@ use App\Enums\PurchaseStatus;
 use App\Models\Purchase;
 use App\Services\PurchaseService;
 use Exception;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -16,6 +17,8 @@ class Show extends Component
 
     public function mount(int $id)
     {
+        Gate::authorize('owner-only');
+
         $this->purchase = Purchase::with(['supplier', 'user', 'warehouse', 'items.product.baseUnit', 'items.presentation'])
             ->where('company_id', auth()->user()->company_id)
             ->findOrFail($id);

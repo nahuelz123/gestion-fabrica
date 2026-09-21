@@ -8,6 +8,7 @@ use App\Models\Purchase;
 use App\Models\Supplier;
 use App\Models\Warehouse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -24,6 +25,8 @@ class Form extends Component
 
     public function mount()
     {
+        Gate::authorize('owner-only');
+
         $this->purchase_date = now()->toDateString();
         $this->addItem();
     }

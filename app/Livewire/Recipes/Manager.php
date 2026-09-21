@@ -4,6 +4,7 @@ namespace App\Livewire\Recipes;
 
 use App\Models\Product;
 use App\Models\Recipe;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -20,6 +21,8 @@ class Manager extends Component
 
     public function mount(int $productId)
     {
+        Gate::authorize('owner-only');
+
         $this->product = Product::where('company_id', auth()->user()->company_id)->findOrFail($productId);
         $this->recipe = $this->product->recipe()->with('items')->first();
 
