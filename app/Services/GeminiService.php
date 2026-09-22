@@ -17,8 +17,8 @@ class GeminiService
             throw new Exception("No Gemini API key configured.");
         }
 
-        // We use gemini-1.5-flash as it is fast and supports JSON schema
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={$apiKey}";
+        // We use gemini-3-flash-preview as it is fast and supports JSON schema / Structured Output
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={$apiKey}";
 
         $payload = [
             'contents' => [
