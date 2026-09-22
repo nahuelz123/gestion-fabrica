@@ -8,7 +8,7 @@ class TelegramService
 {
     public function sendMessage(string $chatId, string $text): void
     {
-        $token = env('TELEGRAM_BOT_TOKEN');
+        $token = config('services.telegram.bot_token');
         if (!$token) return;
 
         Http::post("https://api.telegram.org/bot{$token}/sendMessage", [

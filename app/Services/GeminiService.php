@@ -12,7 +12,7 @@ class GeminiService
      */
     public function analyzeText(string $text): array
     {
-        $apiKey = env('GEMINI_API_KEY');
+        $apiKey = config('services.gemini.api_key');
         if (!$apiKey) {
             throw new Exception("No Gemini API key configured.");
         }
