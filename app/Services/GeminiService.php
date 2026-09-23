@@ -18,7 +18,7 @@ class GeminiService
             throw new Exception("No Gemini API key configured.");
         }
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={$apiKey}";
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 
         $payload = [
             'contents' => [
@@ -54,7 +54,7 @@ class GeminiService
             ]
         ];
 
-        $response = Http::timeout(10)->post($url, $payload);
+        $response = Http::withHeaders(['x-goog-api-key' => $apiKey])->connectTimeout(10)->timeout(30)->retry(2, 500)->post($url, $payload);
 
         if (!$response->successful()) {
             throw new Exception("Gemini API error: " . $response->body());
@@ -84,7 +84,7 @@ class GeminiService
         // [DIAG] Step 2: API key exists (do NOT log the key itself)
         Log::info('[GeminiDiag] API key present, preparing HTTP request');
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={$apiKey}";
+        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
 
         $prompt = $this->buildPrompt($text, $context);
 
@@ -107,7 +107,7 @@ class GeminiService
             // [DIAG] Step 2: sending request
             Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
 
-            $response = Http::timeout(15)->post($url, $payload);
+            $response = Http::withHeaders(['x-goog-api-key' => $apiKey])->connectTimeout(10)->timeout(30)->retry(2, 500)->post($url, $payload);
 
             // [DIAG] Step 3: HTTP status received
             Log::info('[GeminiDiag] Gemini HTTP response received', [
@@ -171,7 +171,8 @@ class GeminiService
             // [DIAG] Step 7: exception
             Log::error('Gemini API Exception', [
                 'class' => get_class($e),
-                'message' => $e->getMessage(),
+                // Never log the raw exception message here: HTTP client exceptions may
+                // contain the full request URL and could expose credentials.
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
