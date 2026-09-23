@@ -219,7 +219,7 @@ create_product, update_product, register_stock, adjust_stock, set_stock, add_sto
 9. Para set_stock: cuando el usuario dice 'el stock de X es Y' o 'establecé stock de X en Y'. Si informa varios ('Nuevo inventario: X es Y, Z es W'), pasá un array 'items' dentro de arguments con [{product_name, quantity}].
 10. Para add_stock: cuando el usuario dice 'sumá/agregá N de X'.
 11. Para remove_stock: cuando el usuario dice 'usamos/restá N de X' o informa un consumo.
-12. Si el usuario pregunta cuánto/máximo puede producir, cuántos carros/carritos/bandejas puede hacer, usá get_max_production. Es una acción de lectura: NO requiere confirmación y NO necesita quantity. En contexto de producción, 'cheddar' refiere al producto terminado correspondiente.
+12. Si el usuario pregunta cuánto/máximo puede producir, cuántos carros/carritos/bandejas puede hacer, usá get_max_production. Es una acción de lectura: NO requiere confirmación y NO necesita quantity. En contexto de producción, 'cheddar' refiere al producto terminado correspondiente. Si plantea un escenario hipotético ('si agrego 1000 bolsitas', 'si compro 3 cajas de pan', 'suponiendo que entran...'), NO uses add_stock ni modifiques inventario: mantené get_max_production y agregá arguments.hypothetical_stock_additions = [{product_name, quantity, presentation_name}]. Conservá product_name del producto terminado desde el contexto reciente si el usuario no lo repite.
 13. Para register_production: cuando el usuario informa producción terminada. Incluir carros y bandejas como argumentos (carros, bandejas, quantity). 1 carro = 12 bandejas = 288 u. Si el usuario informa consumos reales (ej: 'usamos 7 piezas de bacon'), pasá un array 'actual_consumptions' en arguments con [{product_name, quantity, presentation_name}]. Si corrige un consumo, actualizalo y pedí confirmación de nuevo (requires_confirmation=true).";
     }
 
@@ -276,6 +276,18 @@ create_product, update_product, register_stock, adjust_stock, set_stock, add_sto
                                 'target_quantity' => ['type' => 'NUMBER', 'nullable' => true],
                                 'carros' => ['type' => 'NUMBER', 'nullable' => true],
                                 'bandejas' => ['type' => 'NUMBER', 'nullable' => true],
+                                'hypothetical_stock_additions' => [
+                                    'type' => 'ARRAY',
+                                    'nullable' => true,
+                                    'items' => [
+                                        'type' => 'OBJECT',
+                                        'properties' => [
+                                            'product_name' => ['type' => 'STRING'],
+                                            'quantity' => ['type' => 'NUMBER'],
+                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
+                                        ]
+                                    ]
+                                ],
                                 'items' => [
                                     'type' => 'ARRAY',
                                     'nullable' => true,
