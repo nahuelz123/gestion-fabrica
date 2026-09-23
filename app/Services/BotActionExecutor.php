@@ -52,6 +52,7 @@ class BotActionExecutor
                     'calculate_production' => $this->executeCalculateProduction($companyId, $args),
                     'check_production' => $this->executeCheckProduction($companyId, $args),
                     'get_max_production' => $this->executeGetMaxProduction($companyId, $args),
+                    'get_max_production' => $this->executeGetMaxProduction($companyId, $args),
                     'get_missing_inputs' => $this->executeGetMissingInputs($companyId, $args),
                     default => [
                         'success' => false,
@@ -286,6 +287,40 @@ class BotActionExecutor
                 $message .= " El insumo limitante es {$calc['limiting_ingredient']->name}.";
             }
 
+            return ['success' => true, 'message' => $message];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    private function executeGetMaxProduction(int $companyId, array $args): array
+    {
+        $name = $args['product_name'] ?? null;
+        if (!$name) return ['success' => false, 'message' => '¿De qué producto querés calcular la producción máxima?'];
+
+        $products = Product::where('company_id', $companyId)
+            ->where('type', 'finished_product')
+            ->where('name', 'like', "%{$name}%")->get();
+
+        if ($products->count() === 0) return ['success' => false, 'message' => "No encontré un producto terminado que coincida con '{$name}'."];
+        if ($products->count() > 1) return ['success' => false, 'message' => "Encontré varios productos terminados que coinciden con '{$name}'. ¿Cuál querés?"];
+
+        $product = $products->first();
+        try {
+            $calc = $this->calculatorService->calculateMaxProducible($product);
+            $units = (int) $calc['max_units'];
+            $carros = intdiv($units, 288);
+            $rest = $units % 288;
+            $bandejas = intdiv($rest, 24);
+            $sueltas = $rest % 24;
+            $parts = [];
+            if ($carros) $parts[] = "{$carros} carro" . ($carros === 1 ? '' : 's');
+            if ($bandejas) $parts[] = "{$bandejas} bandeja" . ($bandejas === 1 ? '' : 's');
+            if ($sueltas) $parts[] = "{$sueltas} u";
+            if (!$parts) $parts[] = '0 carros';
+
+            $message = "Con el stock actual podés producir hasta " . implode(', ', $parts) . " de {$product->name} ({$units} u en total).";
+            if (!empty($calc['limiting_ingredient'])) $message .= " El insumo limitante es {$calc['limiting_ingredient']->name}.";
             return ['success' => true, 'message' => $message];
         } catch (Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
@@ -617,6 +652,13 @@ class BotActionExecutor
         }
 
         return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
+    }
+
+    private function formatNumber(float $value): string
+    {
+        return abs($value - round($value)) < 0.00001
+            ? (string) (int) round($value)
+            : rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
     }
 
     private function resolveBaseQuantity(Product $product, float $quantity, ?string $presentationName): float
