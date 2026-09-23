@@ -620,12 +620,6 @@ class BotActionExecutor
         return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
     }
 
-    private function formatNumber(float $value): string
-    {
-        return abs($value - round($value)) < 0.00001
-            ? (string) (int) round($value)
-            : rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
-    }
 
     private function resolveBaseQuantity(Product $product, float $quantity, ?string $presentationName): float
     {
