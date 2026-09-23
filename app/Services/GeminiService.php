@@ -68,11 +68,21 @@ class GeminiService
 
     public function analyzeConversation(string $text, array $context = []): array
     {
+        // [DIAG] Step 1: start
+        Log::info('[GeminiDiag] analyzeConversation started', [
+            'text_length' => strlen($text),
+            'has_context' => !empty($context),
+        ]);
+
         $apiKey = config('services.gemini.api_key');
         if (!$apiKey) {
             Log::error('GeminiService: No API key configured.');
+            Log::warning('[GeminiDiag] FALLBACK reason: no API key configured');
             return $this->fallbackResponse();
         }
+
+        // [DIAG] Step 2: API key exists (do NOT log the key itself)
+        Log::info('[GeminiDiag] API key present, preparing HTTP request');
 
         $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={$apiKey}";
 
@@ -94,27 +104,80 @@ class GeminiService
         ];
 
         try {
+            // [DIAG] Step 2: sending request
+            Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
+
             $response = Http::timeout(15)->post($url, $payload);
 
+            // [DIAG] Step 3: HTTP status received
+            Log::info('[GeminiDiag] Gemini HTTP response received', [
+                'status' => $response->status(),
+                'successful' => $response->successful(),
+            ]);
+
             if (!$response->successful()) {
-                Log::error('Gemini API HTTP error', ['status' => $response->status(), 'body' => $response->body()]);
+                // [DIAG] Step 4: non-2xx — log status and safe body excerpt
+                $rawBody = $response->body();
+                $safeBody = mb_substr($rawBody, 0, 800); // Truncate to avoid flooding logs
+                Log::error('Gemini API HTTP error', ['status' => $response->status(), 'body' => $safeBody]);
+                Log::warning('[GeminiDiag] FALLBACK reason: HTTP non-successful', ['status' => $response->status()]);
                 return $this->fallbackResponse();
             }
 
             $data = $response->json();
+
+            // [DIAG] Step 5a: successful response — log top-level structure (no credentials)
+            $candidateCount = count($data['candidates'] ?? []);
+            $hasTextPart = isset($data['candidates'][0]['content']['parts'][0]['text']);
+            Log::info('[GeminiDiag] Gemini successful response structure', [
+                'candidate_count' => $candidateCount,
+                'has_text_part' => $hasTextPart,
+                'finish_reason' => $data['candidates'][0]['finishReason'] ?? 'N/A',
+                'prompt_feedback' => $data['promptFeedback'] ?? null,
+            ]);
+
             $jsonText = $data['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
-            
+
+            // [DIAG] Step 5b: log parsed keys (not values) so we can see what Gemini returned
+            $previewParsed = json_decode($jsonText, true);
+            if (is_array($previewParsed)) {
+                Log::info('[GeminiDiag] Gemini JSON keys received', [
+                    'keys' => array_keys($previewParsed),
+                    'has_reply' => isset($previewParsed['reply']),
+                    'has_action' => isset($previewParsed['action']) && !is_null($previewParsed['action']),
+                    'intent' => $previewParsed['intent'] ?? '(missing)',
+                    'action_name' => $previewParsed['action']['name'] ?? null,
+                    'action_args_keys' => isset($previewParsed['action']['arguments'])
+                        ? array_keys((array) $previewParsed['action']['arguments'])
+                        : null,
+                ]);
+            }
+
             $parsed = json_decode($jsonText, true);
-            
+
             if (json_last_error() !== JSON_ERROR_NONE) {
+                // [DIAG] Step 6: JSON decode failure
                 Log::error('Gemini API JSON parse error', ['raw' => $jsonText]);
+                Log::warning('[GeminiDiag] FALLBACK reason: JSON decode failed', [
+                    'json_error' => json_last_error_msg(),
+                ]);
                 return $this->fallbackResponse();
             }
-            
+
+            Log::info('[GeminiDiag] JSON decoded successfully, passing to validateAndFormatResponse');
             return $this->validateAndFormatResponse($parsed);
-            
+
         } catch (\Throwable $e) {
-            Log::error('Gemini API Exception', ['message' => $e->getMessage()]);
+            // [DIAG] Step 7: exception
+            Log::error('Gemini API Exception', [
+                'class' => get_class($e),
+                'message' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+            Log::warning('[GeminiDiag] FALLBACK reason: exception thrown', [
+                'exception_class' => get_class($e),
+            ]);
             return $this->fallbackResponse();
         }
     }
