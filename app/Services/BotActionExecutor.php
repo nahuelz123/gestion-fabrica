@@ -52,7 +52,6 @@ class BotActionExecutor
                     'calculate_production' => $this->executeCalculateProduction($companyId, $args),
                     'check_production' => $this->executeCheckProduction($companyId, $args),
                     'get_max_production' => $this->executeGetMaxProduction($companyId, $args),
-                    'get_max_production' => $this->executeGetMaxProduction($companyId, $args),
                     'get_missing_inputs' => $this->executeGetMissingInputs($companyId, $args),
                     default => [
                         'success' => false,
@@ -267,7 +266,35 @@ class BotActionExecutor
         $product = $products->first();
 
         try {
-            $calc = $this->calculatorService->calculateMaxProducible($product);
+            // Simulaciones tipo "si agrego 1000 bolsitas" no modifican el stock real.
+            // Gemini envía esos cambios en hypothetical_stock_additions.
+            $stockAdditions = [];
+            $simulatedDescriptions = [];
+
+            foreach (($args['hypothetical_stock_additions'] ?? []) as $addition) {
+                $ingredientName = $addition['product_name'] ?? null;
+                $quantity = (float) ($addition['quantity'] ?? 0);
+                if (!$ingredientName || $quantity <= 0) {
+                    continue;
+                }
+
+                $ingredientResult = $this->findProduct($companyId, $ingredientName);
+                if (!$ingredientResult['success']) {
+                    return $ingredientResult;
+                }
+
+                $ingredient = $ingredientResult['product'];
+                $baseQuantity = $this->resolveBaseQuantity(
+                    $ingredient,
+                    $quantity,
+                    $addition['presentation_name'] ?? null
+                );
+
+                $stockAdditions[$ingredient->id] = ($stockAdditions[$ingredient->id] ?? 0) + $baseQuantity;
+                $simulatedDescriptions[] = $this->formatNumber($quantity) . ' ' . ($addition['presentation_name'] ?? $ingredient->presentation) . ' de ' . $ingredient->name;
+            }
+
+            $calc = $this->calculatorService->calculateMaxProducible($product, $stockAdditions);
             $units = (int) $calc['max_units'];
             $carros = intdiv($units, 288);
             $remainingAfterCars = $units % 288;
@@ -280,7 +307,10 @@ class BotActionExecutor
             if ($looseUnits > 0) $parts[] = "{$looseUnits} u";
             if (empty($parts)) $parts[] = '0 carros';
 
-            $message = "Con el stock actual podés producir hasta " . implode(', ', $parts)
+            $prefix = empty($simulatedDescriptions)
+                ? "Con el stock actual"
+                : "Simulando +" . implode(', +', $simulatedDescriptions) . " sobre el stock actual";
+            $message = $prefix . " podés producir hasta " . implode(', ', $parts)
                 . " de {$product->name} ({$units} u en total).";
 
             if (!empty($calc['limiting_ingredient'])) {
