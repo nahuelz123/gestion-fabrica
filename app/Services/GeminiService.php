@@ -214,12 +214,13 @@ Reglas estrictas:
 5. NO inventes acciones ni nombres. Usá solo los definidos.
 6. Si una acción requiere confirmación y los datos están listos, pedí confirmación. NO preguntes datos que ya se encuentran en el contexto.
 7. Las acciones (action.name) PERMITIDAS EXCLUSIVAMENTE SON:
-create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_missing_inputs, unknown.
+create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, unknown.
 8. Si el usuario confirma ('sí', 'dale') y hay una acción lista, emite el action correspondiente y requiere confirmación false.
 9. Para set_stock: cuando el usuario dice 'el stock de X es Y' o 'establecé stock de X en Y'. Si informa varios ('Nuevo inventario: X es Y, Z es W'), pasá un array 'items' dentro de arguments con [{product_name, quantity}].
 10. Para add_stock: cuando el usuario dice 'sumá/agregá N de X'.
 11. Para remove_stock: cuando el usuario dice 'usamos/restá N de X' o informa un consumo.
-12. Para register_production: cuando el usuario informa producción terminada. Incluir carros y bandejas como argumentos (carros, bandejas, quantity). 1 carro = 12 bandejas = 288 u. Si el usuario informa consumos reales (ej: 'usamos 7 piezas de bacon'), pasá un array 'actual_consumptions' en arguments con [{product_name, quantity, presentation_name}]. Si corrige un consumo, actualizalo y pedí confirmación de nuevo (requires_confirmation=true).";
+12. Si el usuario pregunta cuánto/máximo puede producir, cuántos carros/carritos/bandejas puede hacer, usá get_max_production. Es una acción de lectura: NO requiere confirmación y NO necesita quantity. En contexto de producción, 'cheddar' refiere al producto terminado correspondiente.
+13. Para register_production: cuando el usuario informa producción terminada. Incluir carros y bandejas como argumentos (carros, bandejas, quantity). 1 carro = 12 bandejas = 288 u. Si el usuario informa consumos reales (ej: 'usamos 7 piezas de bacon'), pasá un array 'actual_consumptions' en arguments con [{product_name, quantity, presentation_name}]. Si corrige un consumo, actualizalo y pedí confirmación de nuevo (requires_confirmation=true).";
     }
 
     private function buildPrompt(string $text, array $context): string
@@ -241,7 +242,7 @@ create_product, update_product, register_stock, adjust_stock, set_stock, add_sto
                         'create_product', 'update_product', 'register_stock', 'adjust_stock',
                         'set_stock', 'add_stock', 'remove_stock', 'register_production',
                         'get_stock', 'get_low_stock', 'get_expiring_products', 'create_recipe',
-                        'update_recipe', 'get_recipe', 'calculate_production', 'check_production',
+                        'update_recipe', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production',
                         'get_missing_inputs', 'unknown'
                     ]
                 ],
@@ -320,7 +321,7 @@ create_product, update_product, register_stock, adjust_stock, set_stock, add_sto
             'create_product', 'update_product', 'register_stock', 'adjust_stock',
             'set_stock', 'add_stock', 'remove_stock', 'register_production',
             'get_stock', 'get_low_stock', 'get_expiring_products', 'create_recipe',
-            'update_recipe', 'get_recipe', 'calculate_production', 'check_production',
+            'update_recipe', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production',
             'get_missing_inputs', 'unknown'
         ];
 
