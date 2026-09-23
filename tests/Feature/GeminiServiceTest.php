@@ -102,17 +102,67 @@ class GeminiServiceTest extends TestCase
         $this->mockGeminiResponse([
             'intent' => 'get_stock',
             'reply' => 'Consultando stock...',
-            'entities' => ['name' => 'Harina'],
-            'action' => ['name' => 'get_stock', 'arguments' => ['name' => 'Harina']],
+            'entities' => ['name' => 'Papel manteca'],
+            'action' => ['name' => 'get_stock', 'arguments' => ['product_name' => 'Papel manteca']],
             'missing' => [],
             'requires_confirmation' => false,
             'confidence' => 0.95
         ]);
 
-        $result = $this->service->analyzeConversation('¿cuánto stock hay de harina?');
+        $result = $this->service->analyzeConversation('¿cuánto papel manteca tenemos?');
         $this->assertEquals('get_stock', $result['intent']);
         $this->assertNotNull($result['action']);
         $this->assertEquals('get_stock', $result['action']['name']);
+        $this->assertEquals('Papel manteca', $result['action']['arguments']['product_name']);
+    }
+
+    public function test_register_production_with_actual_consumptions()
+    {
+        $this->mockGeminiResponse([
+            'intent' => 'register_production',
+            'reply' => 'Registrando producción...',
+            'action' => [
+                'name' => 'register_production',
+                'arguments' => [
+                    'product_name' => 'Hamburguesa cheddar',
+                    'quantity' => 100,
+                    'actual_consumptions' => [
+                        ['product_name' => 'Pan', 'quantity' => 100, 'presentation_name' => 'unidad']
+                    ]
+                ]
+            ],
+            'requires_confirmation' => true,
+            'confidence' => 0.99
+        ]);
+
+        $result = $this->service->analyzeConversation('usamos 100 panes para 100 hamburguesas');
+        $this->assertEquals('register_production', $result['intent']);
+        $this->assertIsArray($result['action']['arguments']['actual_consumptions']);
+        $this->assertEquals('Pan', $result['action']['arguments']['actual_consumptions'][0]['product_name']);
+    }
+
+    public function test_set_stock_with_items()
+    {
+        $this->mockGeminiResponse([
+            'intent' => 'set_stock',
+            'reply' => 'Actualizando stock múltiple...',
+            'action' => [
+                'name' => 'set_stock',
+                'arguments' => [
+                    'items' => [
+                        ['product_name' => 'Harina', 'quantity' => 10, 'presentation_name' => 'bolsa'],
+                        ['product_name' => 'Sal', 'quantity' => 5, 'presentation_name' => 'paquete']
+                    ]
+                ]
+            ],
+            'requires_confirmation' => true,
+            'confidence' => 0.99
+        ]);
+
+        $result = $this->service->analyzeConversation('hay 10 bolsas de harina y 5 de sal');
+        $this->assertEquals('set_stock', $result['intent']);
+        $this->assertCount(2, $result['action']['arguments']['items']);
+        $this->assertEquals('Harina', $result['action']['arguments']['items'][0]['product_name']);
     }
 
     // 5. check_production
@@ -122,7 +172,7 @@ class GeminiServiceTest extends TestCase
             'intent' => 'check_production',
             'reply' => 'Verificando si podemos producir 500 unidades...',
             'entities' => ['name' => 'Pan', 'quantity' => 500],
-            'action' => ['name' => 'check_production', 'arguments' => ['name' => 'Pan', 'quantity' => 500]],
+            'action' => ['name' => 'check_production', 'arguments' => ['product_name' => 'Pan', 'quantity' => 500]],
             'missing' => [],
             'requires_confirmation' => false,
             'confidence' => 0.99

@@ -177,7 +177,46 @@ create_product, update_product, register_stock, adjust_stock, set_stock, add_sto
                     'nullable' => true,
                     'properties' => [
                         'name' => ['type' => 'STRING'],
-                        'arguments' => ['type' => 'OBJECT']
+                        'arguments' => [
+                            'type' => 'OBJECT',
+                            'properties' => [
+                                'name' => ['type' => 'STRING', 'nullable' => true],
+                                'presentation' => ['type' => 'STRING', 'nullable' => true],
+                                'product_name' => ['type' => 'STRING', 'nullable' => true],
+                                'presentation_name' => ['type' => 'STRING', 'nullable' => true],
+                                'quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                                'initial_stock' => ['type' => 'NUMBER', 'nullable' => true],
+                                'type' => ['type' => 'STRING', 'nullable' => true],
+                                'yield_quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                                'target_quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                                'carros' => ['type' => 'NUMBER', 'nullable' => true],
+                                'bandejas' => ['type' => 'NUMBER', 'nullable' => true],
+                                'items' => [
+                                    'type' => 'ARRAY',
+                                    'nullable' => true,
+                                    'items' => [
+                                        'type' => 'OBJECT',
+                                        'properties' => [
+                                            'product_name' => ['type' => 'STRING', 'nullable' => true],
+                                            'quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
+                                        ]
+                                    ]
+                                ],
+                                'actual_consumptions' => [
+                                    'type' => 'ARRAY',
+                                    'nullable' => true,
+                                    'items' => [
+                                        'type' => 'OBJECT',
+                                        'properties' => [
+                                            'product_name' => ['type' => 'STRING', 'nullable' => true],
+                                            'quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
                     ]
                 ],
                 'missing' => [
