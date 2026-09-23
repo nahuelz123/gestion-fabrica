@@ -89,4 +89,52 @@ class ProductionCalculatorService
             'items' => $items,
         ];
     }
+
+    /**
+     * Calcula la cantidad máxima de unidades terminadas que puede fabricarse
+     * con el stock actual, usando el ingrediente limitante de la receta.
+     */
+    public function calculateMaxProducible(Product $product): array
+    {
+        $recipe = $product->recipe()->with('items.product')->first();
+
+        if (!$recipe || $recipe->yield_quantity <= 0 || $recipe->items->isEmpty()) {
+            throw new Exception("El producto '{$product->name}' no tiene una receta válida configurada.");
+        }
+
+        $ingredientIds = $recipe->items->pluck('product_id')->toArray();
+        $stocks = Stock::where('company_id', $product->company_id)
+            ->whereIn('product_id', $ingredientIds)
+            ->selectRaw('product_id, SUM(quantity) as total_stock')
+            ->groupBy('product_id')
+            ->pluck('total_stock', 'product_id');
+
+        $maxUnits = INF;
+        $limitingIngredient = null;
+
+        foreach ($recipe->items as $item) {
+            $requiredPerUnit = (float) $item->quantity_base / (float) $recipe->yield_quantity;
+            if ($requiredPerUnit <= 0) {
+                continue;
+            }
+
+            $available = (float) $stocks->get($item->product_id, 0);
+            $possible = floor($available / $requiredPerUnit);
+
+            if ($possible < $maxUnits) {
+                $maxUnits = $possible;
+                $limitingIngredient = $item->product;
+            }
+        }
+
+        if ($maxUnits === INF) {
+            $maxUnits = 0;
+        }
+
+        return [
+            'max_units' => (int) $maxUnits,
+            'limiting_ingredient' => $limitingIngredient,
+        ];
+    }
+
 }
