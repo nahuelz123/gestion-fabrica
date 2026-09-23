@@ -2,6 +2,10 @@
     <div class="flex justify-between items-center mb-6">
         <h1 class="text-2xl font-bold text-gray-800">Inventario Actual</h1>
         <div class="space-x-2">
+            <a href="{{ route('inventory.adjust') }}" wire:navigate
+               class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition">
+                ± Ajuste Manual
+            </a>
             <a href="{{ route('inventory.entry') }}" wire:navigate
                class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium transition">
                 + Entrada

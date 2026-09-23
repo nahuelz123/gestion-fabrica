@@ -11,12 +11,14 @@ class AiConversation extends Model
         'user_id',
         'telegram_chat_id',
         'pending_action',
+        'context',
     ];
 
     protected function casts(): array
     {
         return [
             'pending_action' => 'array',
+            'context' => 'array',
         ];
     }
 

@@ -38,6 +38,12 @@ class ProductionCalculatorService
             ->groupBy('product_id')
             ->pluck('total_stock', 'product_id');
 
+        // Load presentations for all ingredients in one query
+        $presentations = \App\Models\ProductPresentation::whereIn('product_id', $ingredientIds)
+            ->where('is_purchase_default', true)
+            ->pluck(null, 'product_id')
+            ->map(fn($p) => $p);
+
         foreach ($recipe->items as $item) {
             $required = $item->quantity_base * $multiplier;
             $available = (float) $stocks->get($item->product_id, 0);
@@ -46,12 +52,35 @@ class ProductionCalculatorService
             if ($missing > 0) {
                 $canProduce = false;
             }
+
+            // Calculate physical presentation quantities
+            // NOTE: conversion factors for bacon, lomito, queso fiambre, jamón fiambre
+            // are currently UNCONFIRMED (seeder values). Physical representation
+            // for those products should be treated as informational only.
+            $pres = $presentations->get($item->product_id);
+            $factor = $pres ? (float) $pres->conversion_factor : 1.0;
+            $presName = $pres ? $pres->name : $item->product->baseUnit->name;
+            // Apply ceil() only when the factor > 1 (physical unit is indivisible)
+            $requiresPhysicalCeil = $factor > 1;
+            $requiredPhysical = $requiresPhysicalCeil ? ceil($required / $factor) : $required;
+            $missingPhysical = $requiresPhysicalCeil && $missing > 0 ? ceil($missing / $factor) : $missing;
             
             $items[] = [
                 'ingredient' => $item->product,
                 'required' => $required,
                 'available' => $available,
                 'missing' => $missing,
+                // Presentation layer — for display only, does NOT affect can_produce logic
+                'presentation' => [
+                    'name' => $presName,
+                    'factor' => $factor,
+                    'required_physical' => $requiredPhysical,
+                    'missing_physical' => $missingPhysical,
+                    'needs_ceil' => $requiresPhysicalCeil,
+                    // How many complete vs incomplete units
+                    'complete_units' => $requiresPhysicalCeil ? floor($required / $factor) : null,
+                    'remainder_units' => $requiresPhysicalCeil ? ($required % $factor) : null,
+                ],
             ];
         }
 

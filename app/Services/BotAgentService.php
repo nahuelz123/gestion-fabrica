@@ -22,10 +22,149 @@ class BotAgentService
 
     public function processMessage(User $user, string $chatId, string $text): void
     {
-        // FLUJO A: Evaluación de estado pendiente (Transacción corta y cerrada)
+        $conversation = AiConversation::firstOrCreate(
+            ['user_id' => $user->id],
+            ['telegram_chat_id' => $chatId]
+        );
+
+        // Fallback for legacy conversations (pending_action exists, but no context)
+        if (!empty($conversation->pending_action) && empty($conversation->context)) {
+            $this->legacyProcessMessage($conversation, $user, $chatId, $text);
+            return;
+        }
+
+        // --- NEW CONVERSATIONAL FLOW ---
+        $context = $conversation->context ?? [];
+        $context = $this->addRecentMessage($context, 'user', $text);
+
+        // Manual strict cancellation check
+        $textNorm = trim(mb_strtolower($text));
+        $cancelWords = ['no', 'cancelar', 'cancelá', 'cancela', 'dejá', 'deja', 'mejor no'];
+        
+        $currentStatus = $context['status'] ?? 'idle';
+        
+        if (in_array($textNorm, $cancelWords) && in_array($currentStatus, ['collecting', 'ready_for_confirmation'])) {
+            $context['status'] = 'cancelled';
+            $reply = 'Operación cancelada.';
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+            
+            DB::transaction(function () use ($conversation, $context) {
+                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+                $lockedConv->update(['context' => $context]);
+            });
+            
+            $this->telegramService->sendMessage($chatId, $reply);
+            return;
+        }
+
+        $analysis = $this->geminiService->analyzeConversation($text, $context);
+
+        if ($analysis['intent'] === 'unknown' && empty($analysis['action'])) {
+            $context = $this->addRecentMessage($context, 'assistant', $analysis['reply']);
+            
+            DB::transaction(function () use ($conversation, $context) {
+                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+                $lockedConv->update(['context' => $context]);
+            });
+            
+            $this->telegramService->sendMessage($chatId, $analysis['reply']);
+            return;
+        }
+
+        $previousStatus = $context['status'] ?? 'idle';
+        $previousIntent = $context['intent'] ?? null;
+
+        // Update context based on Gemini analysis
+        $context['intent'] = $analysis['intent'];
+        
+        // Merge entities to preserve previous ones
+        $context['entities'] = array_merge($context['entities'] ?? [], array_filter($analysis['entities'] ?? []));
+
+        $status = 'idle';
+        $actionToExecute = null;
+        $readActions = ['get_stock', 'get_low_stock', 'get_recipe', 'calculate_production', 'check_production', 'get_missing_inputs'];
+        // Stock adjustment actions go through the normal confirmation flow (not readActions)
+        // register_production also goes through confirmation because it modifies stock.
+        // set_stock, add_stock, remove_stock each require user confirmation before execution.
+
+        if ($analysis['requires_confirmation']) {
+            $status = 'ready_for_confirmation';
+            $context['pending_action'] = $analysis['action'];
+        } elseif (!empty($analysis['action']) && !$analysis['requires_confirmation']) {
+            $actionName = $analysis['action']['name'] ?? '';
+            
+            if (in_array($actionName, $readActions)) {
+                // Read actions can be executed immediately
+                $status = 'confirmed';
+                $actionToExecute = $analysis['action'];
+            } else {
+                // Mutating actions MUST have been previously confirmed by the user
+                if ($previousStatus === 'ready_for_confirmation' && $previousIntent === $analysis['intent']) {
+                    // Safe to execute. Use the stored pending_action as the canonical source
+                    // to avoid Gemini injecting a different action at the last second
+                    $status = 'confirmed';
+                    $actionToExecute = $context['pending_action'] ?? $analysis['action'];
+                } else {
+                    // Gemini sent a mutating action without confirmation!
+                    // Demote to ready_for_confirmation
+                    $status = 'ready_for_confirmation';
+                    $context['pending_action'] = $analysis['action'];
+                }
+            }
+        } elseif (!empty($analysis['missing'])) {
+            $status = 'collecting';
+        }
+
+        $context['status'] = $status;
+        $reply = $analysis['reply'];
+
+        // EXECUTION
+        if ($status === 'confirmed' && $actionToExecute) {
+            $executor = app(BotActionExecutor::class);
+            $result = $executor->execute($user, $chatId, $actionToExecute, $context);
+            
+            $reply = $result['message'];
+            
+            if ($result['success']) {
+                $context['status'] = 'completed';
+                $context['pending_action'] = null;
+            } else {
+                // Keep it idle or ready to let the user retry
+                $context['status'] = 'idle';
+            }
+        }
+
+        $context = $this->addRecentMessage($context, 'assistant', $reply);
+        
+        DB::transaction(function () use ($conversation, $context) {
+            $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+            $lockedConv->update(['context' => $context]);
+        });
+
+        $this->telegramService->sendMessage($chatId, $reply);
+    }
+
+    private function addRecentMessage(array $context, string $role, string $text): array
+    {
+        $messages = $context['recent_messages'] ?? [];
+        $messages[] = ['role' => $role, 'text' => $text];
+        
+        if (count($messages) > 10) {
+            $messages = array_slice($messages, -10);
+        }
+        
+        $context['recent_messages'] = $messages;
+        return $context;
+    }
+
+    /**
+     * @deprecated Legacy flow
+     */
+    private function legacyProcessMessage(AiConversation $conversation, User $user, string $chatId, string $text): void
+    {
         $proceedToFlowB = false;
 
-        DB::transaction(function () use ($user, $chatId, $text, &$proceedToFlowB) {
+        DB::transaction(function () use ($conversation, $user, $chatId, $text, &$proceedToFlowB) {
             $conversation = AiConversation::where('user_id', $user->id)->lockForUpdate()->first();
 
             if (app()->environment('testing') && env('TEST_BOT_SLEEP')) {
@@ -38,7 +177,6 @@ class BotAgentService
                 $negative = ['no', 'cancelar', 'cancela'];
 
                 if (in_array($textNorm, $affirmative)) {
-                    // Confirmado
                     try {
                         $actionData = $conversation->pending_action;
                         if (isset($actionData['type']) && is_string($actionData['type'])) {
@@ -55,14 +193,12 @@ class BotAgentService
                         $conversation->update(['pending_action' => null]);
                         $this->telegramService->sendMessage($chatId, '❌ No pude registrarlo: ' . $e->getMessage());
                     }
-                    return; // Corta flujo DB, no sigue al B
+                    return; 
                 } elseif (in_array($textNorm, $negative)) {
-                    // Cancelado
                     $conversation->update(['pending_action' => null]);
-                    $this->telegramService->sendMessage($chatId, '🚫 Operación cancelada.');
+                    $this->telegramService->sendMessage($chatId, '❌ Operación cancelada.');
                     return;
                 } else {
-                    // Ambiguo: Limpia estado y salta a flujo B
                     $conversation->update(['pending_action' => null]);
                     $proceedToFlowB = true;
                 }
@@ -75,7 +211,6 @@ class BotAgentService
             return;
         }
 
-        // FLUJO B: Nueva interacción (Sin locks abiertos)
         try {
             $analysis = $this->geminiService->analyzeText($text);
             $intent = $analysis['intent'] ?? 'unknown';
@@ -87,7 +222,6 @@ class BotAgentService
                 return;
             }
 
-            // Resolución del producto
             $products = Product::where('company_id', $user->company_id)
                 ->where('name', 'like', "%{$productName}%")
                 ->get();
@@ -105,7 +239,6 @@ class BotAgentService
 
             $product = $products->first();
 
-            // Ejecución según intent
             if ($intent === 'check_stock') {
                 $stock = Stock::where('product_id', $product->id)->sum('quantity');
                 $unit = $product->baseUnit->abbreviation ?? 'ud';
@@ -139,8 +272,6 @@ class BotAgentService
                     return;
                 }
 
-                // Generar pending action
-                // Buscamos depósito por defecto (el primero)
                 $warehouseId = \App\Models\Warehouse::where('company_id', $user->company_id)->first()->id;
 
                 $data = [
@@ -167,3 +298,4 @@ class BotAgentService
         }
     }
 }
+

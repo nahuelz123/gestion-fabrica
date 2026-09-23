@@ -31,6 +31,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/inventario', \App\Livewire\Inventory\StockIndex::class)->name('inventory.index');
     Route::get('/inventario/entrada', \App\Livewire\Inventory\StockEntry::class)->name('inventory.entry');
     Route::get('/inventario/salida', \App\Livewire\Inventory\StockExit::class)->name('inventory.exit');
+    Route::get('/inventario/ajuste', \App\Livewire\Inventory\StockManager::class)->name('inventory.adjust');
 
     // Suppliers
     Route::get('/proveedores', \App\Livewire\Suppliers\Index::class)->name('suppliers.index');

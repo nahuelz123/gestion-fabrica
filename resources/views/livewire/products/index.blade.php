@@ -26,10 +26,8 @@
                 <tr>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Categoría</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unidad</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Presentaciones</th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Costo</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Presentación</th>
                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
                     <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Acciones</th>
                 </tr>
@@ -47,20 +45,14 @@
                                 <span class="ml-1 text-xs text-red-600" title="Requiere vencimiento">📅</span>
                             @endif
                         </td>
-                        <td class="px-4 py-3 text-sm text-gray-600">{{ $product->category->name }}</td>
-                        <td class="px-4 py-3 text-sm text-gray-600">{{ $product->baseUnit->abbreviation }}</td>
                         <td class="px-4 py-3 text-sm text-gray-600">
-                            @if ($product->presentations->isNotEmpty())
-                                @foreach ($product->presentations as $pres)
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 mr-1 mb-1">
-                                        {{ $pres->name }} (×{{ rtrim(rtrim($pres->conversion_factor, '0'), '.') }})
-                                    </span>
-                                @endforeach
-                            @else
-                                <span class="text-gray-400">—</span>
-                            @endif
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $product->type->value === 'raw_material' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800' }}">
+                                {{ $product->type->label() }}
+                            </span>
                         </td>
-                        <td class="px-4 py-3 text-sm text-gray-600">${{ number_format($product->cost, 2) }}</td>
+                        <td class="px-4 py-3 text-sm text-gray-600">
+                            {{ $product->presentation }}
+                        </td>
                         <td class="px-4 py-3">
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $product->isActive() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
                                 {{ $product->status->label() }}

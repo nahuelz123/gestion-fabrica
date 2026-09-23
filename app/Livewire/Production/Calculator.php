@@ -4,8 +4,9 @@ namespace App\Livewire\Production;
 
 use App\Models\Product;
 use App\Services\ProductionCalculatorService;
+use App\Services\ProductionOrderService;
 use Exception;
-use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -21,8 +22,6 @@ class Calculator extends Component
 
     // Fields for execution
     public string $warehouse_id = '';
-    public string $output_lot_code = '';
-    public string $output_expiration_date = '';
 
     public function calculate(ProductionCalculatorService $calculator)
     {
@@ -44,48 +43,30 @@ class Calculator extends Component
         }
     }
 
-    public function confirm(ProductionService $productionService)
+    public function confirm(ProductionOrderService $productionOrderService)
     {
-        Gate::authorize('owner-only');
-
         $this->validate([
-            'warehouse_id' => 'required|exists:warehouses,id',
+            'product_id' => 'required|exists:products,id',
+            'target_quantity' => 'required|numeric|min:0.01',
         ]);
 
-        $product = Product::find($this->product_id);
-
-        if ($product->requires_lot) {
-            $this->validate([
-                'output_lot_code' => 'required|string|max:255',
-            ], [
-                'output_lot_code.required' => 'El código de lote es obligatorio para este producto final.',
-            ]);
-
-            if ($product->requires_expiration) {
-                $this->validate([
-                    'output_expiration_date' => 'required|date',
-                ]);
-            }
-        }
+        $product = Product::where('company_id', auth()->user()->company_id)->findOrFail($this->product_id);
 
         try {
-            $productionService->executeProduction(
-                $this->product_id,
-                $this->warehouse_id,
+            $result = $productionOrderService->registerProduction(
+                auth()->user(),
+                $product,
                 (float) $this->target_quantity,
-                [
-                    'lot_code' => $this->output_lot_code ?: null,
-                    'expiration_date' => $this->output_expiration_date ?: null,
-                ],
-                auth()->id()
             );
 
             $this->result = null;
             $this->product_id = '';
             $this->target_quantity = '1';
-            $this->output_lot_code = '';
-            $this->output_expiration_date = '';
-            $this->successMessage = 'Producción registrada exitosamente. El stock fue descontado y el producto final ingresado.';
+            $this->successMessage = '✅ Producción registrada. Se descontaron los insumos y se sumó el producto terminado.';
+
+            if (!empty($result['warnings'])) {
+                $this->successMessage .= "\n" . implode("\n", $result['warnings']);
+            }
             
         } catch (Exception $e) {
             $this->errorMessage = $e->getMessage();
@@ -100,11 +81,8 @@ class Calculator extends Component
             ->orderBy('name')
             ->get();
 
-        $warehouses = \App\Models\Warehouse::where('company_id', auth()->user()->company_id)->orderBy('name')->get();
-
         return view('livewire.production.calculator', [
             'products' => $products,
-            'warehouses' => $warehouses,
         ]);
     }
 }
