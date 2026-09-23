@@ -18,47 +18,21 @@ class GeminiService
             throw new Exception("No Gemini API key configured.");
         }
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent";
+        $url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
         $payload = [
-            'contents' => [
-                ['parts' => [['text' => $text]]]
+            'model' => 'gemini-3-flash-preview',
+            'messages' => [
+                ['role' => 'system', 'content' => 'Sos el asistente virtual de un sistema de gestión de fábrica. Respondé exclusivamente con JSON válido.'],
+                ['role' => 'user', 'content' => $text],
             ],
-            'systemInstruction' => [
-                'parts' => [
-                    ['text' => 'Sos el asistente virtual de un sistema de gestión de fábrica...']
-                ]
-            ],
-            'generationConfig' => [
-                'responseMimeType' => 'application/json',
-                'responseSchema' => [
-                    'type' => 'OBJECT',
-                    'properties' => [
-                        'intent' => [
-                            'type' => 'STRING',
-                            'enum' => ['check_stock', 'propose_stock_entry', 'calculate_production', 'unknown']
-                        ],
-                        'product_name' => [
-                            'type' => 'STRING',
-                            'nullable' => true,
-                            'description' => 'El nombre del insumo o producto mencionado.'
-                        ],
-                        'quantity' => [
-                            'type' => 'NUMBER',
-                            'nullable' => true,
-                            'description' => 'La cantidad mencionada. Si no se especifica, nulo.'
-                        ]
-                    ],
-                    'required' => ['intent']
-                ]
-            ]
+            'response_format' => ['type' => 'json_object'],
+            'temperature' => 0.1,
         ];
 
-        $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
-                ->withOptions(['curl' => [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]])
-                ->connectTimeout(10)
-                ->timeout(30)
-                ->retry(1, 500)
+        $response = Http::withToken($apiKey)
+                ->connectTimeout(5)
+                ->timeout(45)
                 ->post($url, $payload);
 
         if (!$response->successful()) {
@@ -66,7 +40,7 @@ class GeminiService
         }
 
         $data = $response->json();
-        $jsonText = $data['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
+        $jsonText = $data['choices'][0]['message']['content'] ?? '{}';
         
         return json_decode($jsonText, true) ?? ['intent' => 'unknown'];
     }
@@ -94,29 +68,22 @@ class GeminiService
         $prompt = $this->buildPrompt($text, $context);
 
         $payload = [
-            'contents' => [
-                ['parts' => [['text' => $prompt]]]
+            'model' => 'gemini-3-flash-preview',
+            'messages' => [
+                ['role' => 'system', 'content' => $this->getSystemInstruction() . "\n\nRespondé EXCLUSIVAMENTE con un objeto JSON válido que respete esta estructura: " . json_encode($this->getResponseSchema(), JSON_UNESCAPED_UNICODE)],
+                ['role' => 'user', 'content' => $prompt],
             ],
-            'systemInstruction' => [
-                'parts' => [
-                    ['text' => $this->getSystemInstruction()]
-                ]
-            ],
-            'generationConfig' => [
-                'responseMimeType' => 'application/json',
-                'responseSchema' => $this->getResponseSchema()
-            ]
+            'response_format' => ['type' => 'json_object'],
+            'temperature' => 0.1,
         ];
 
         try {
             // [DIAG] Step 2: sending request
             Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
 
-            $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
-                ->withOptions(['curl' => [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]])
-                ->connectTimeout(10)
-                ->timeout(30)
-                ->retry(1, 500)
+            $response = Http::withToken($apiKey)
+                ->connectTimeout(5)
+                ->timeout(45)
                 ->post($url, $payload);
 
             // [DIAG] Step 3: HTTP status received
@@ -137,16 +104,16 @@ class GeminiService
             $data = $response->json();
 
             // [DIAG] Step 5a: successful response — log top-level structure (no credentials)
-            $candidateCount = count($data['candidates'] ?? []);
-            $hasTextPart = isset($data['candidates'][0]['content']['parts'][0]['text']);
+            $candidateCount = count($data['choices'] ?? []);
+            $hasTextPart = isset($data['choices'][0]['message']['content']);
             Log::info('[GeminiDiag] Gemini successful response structure', [
                 'candidate_count' => $candidateCount,
                 'has_text_part' => $hasTextPart,
-                'finish_reason' => $data['candidates'][0]['finishReason'] ?? 'N/A',
-                'prompt_feedback' => $data['promptFeedback'] ?? null,
+                'finish_reason' => $data['choices'][0]['finish_reason'] ?? 'N/A',
+                'prompt_feedback' => null,
             ]);
 
-            $jsonText = $data['candidates'][0]['content']['parts'][0]['text'] ?? '{}';
+            $jsonText = $data['choices'][0]['message']['content'] ?? '{}';
 
             // [DIAG] Step 5b: log parsed keys (not values) so we can see what Gemini returned
             $previewParsed = json_decode($jsonText, true);
