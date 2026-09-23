@@ -51,6 +51,7 @@ class BotActionExecutor
                     'get_recipe' => $this->executeGetRecipe($companyId, $args),
                     'calculate_production' => $this->executeCalculateProduction($companyId, $args),
                     'check_production' => $this->executeCheckProduction($companyId, $args),
+                    'get_max_production' => $this->executeGetMaxProduction($companyId, $args),
                     'get_missing_inputs' => $this->executeGetMissingInputs($companyId, $args),
                     default => [
                         'success' => false,
@@ -96,11 +97,26 @@ class BotActionExecutor
         }
 
         $product = $result['product'];
-        $qty = Stock::where('product_id', $product->id)->sum('quantity');
+        $qty = (float) Stock::where('company_id', $companyId)
+            ->where('product_id', $product->id)
+            ->sum('quantity');
+
+        $baseUnit = $product->baseUnit->abbreviation ?? 'u';
+        $message = "Tenemos " . $this->formatNumber($qty) . " {$baseUnit} de {$product->name}";
+
+        $presentation = $product->presentations()
+            ->where('is_purchase_default', true)
+            ->first();
+
+        if ($presentation && (float) $presentation->conversion_factor > 1) {
+            $factor = (float) $presentation->conversion_factor;
+            $physical = $qty / $factor;
+            $message .= " (" . $this->formatNumber($physical) . " {$presentation->name})";
+        }
 
         return [
             'success' => true,
-            'message' => "Tenemos {$qty} {$product->presentation} de {$product->name}."
+            'message' => $message . '.'
         ];
     }
 
@@ -221,6 +237,56 @@ class BotActionExecutor
                 $msg .= $this->formatItemLine($item);
             }
             return ['success' => true, 'message' => trim($msg)];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    private function executeGetMaxProduction(int $companyId, array $args): array
+    {
+        $name = $args['product_name'] ?? null;
+        if (!$name) {
+            return ['success' => false, 'message' => '¿De qué producto querés calcular la producción máxima?'];
+        }
+
+        // Para cálculos de producción priorizamos productos terminados. Así,
+        // "cheddar" resuelve a "Hamburguesa cheddar" y no al fiambre cheddar.
+        $products = Product::where('company_id', $companyId)
+            ->where('type', 'finished_product')
+            ->where('name', 'like', "%{$name}%")
+            ->get();
+
+        if ($products->count() === 0) {
+            return ['success' => false, 'message' => "No encontré un producto terminado que coincida con '{$name}'."];
+        }
+        if ($products->count() > 1) {
+            return ['success' => false, 'message' => "Encontré varios productos terminados que coinciden con '{$name}'. ¿Cuál querés?"];
+        }
+
+        $product = $products->first();
+
+        try {
+            $calc = $this->calculatorService->calculateMaxProducible($product);
+            $units = (int) $calc['max_units'];
+            $carros = intdiv($units, 288);
+            $remainingAfterCars = $units % 288;
+            $bandejas = intdiv($remainingAfterCars, 24);
+            $looseUnits = $remainingAfterCars % 24;
+
+            $parts = [];
+            if ($carros > 0) $parts[] = "{$carros} carro" . ($carros === 1 ? '' : 's');
+            if ($bandejas > 0) $parts[] = "{$bandejas} bandeja" . ($bandejas === 1 ? '' : 's');
+            if ($looseUnits > 0) $parts[] = "{$looseUnits} u";
+            if (empty($parts)) $parts[] = '0 carros';
+
+            $message = "Con el stock actual podés producir hasta " . implode(', ', $parts)
+                . " de {$product->name} ({$units} u en total).";
+
+            if (!empty($calc['limiting_ingredient'])) {
+                $message .= " El insumo limitante es {$calc['limiting_ingredient']->name}.";
+            }
+
+            return ['success' => true, 'message' => $message];
         } catch (Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         }
@@ -544,6 +610,15 @@ class BotActionExecutor
      * NOTE: For bacon/lomito/queso/jamón, conversion factors are currently
      * unconfirmed (seeder placeholder values). This is documented intentionally.
      */
+    private function formatNumber(float $value): string
+    {
+        if (abs($value - round($value)) < 0.00001) {
+            return (string) (int) round($value);
+        }
+
+        return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
+    }
+
     private function resolveBaseQuantity(Product $product, float $quantity, ?string $presentationName): float
     {
         if ($presentationName) {
