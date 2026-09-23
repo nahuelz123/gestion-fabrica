@@ -54,7 +54,12 @@ class GeminiService
             ]
         ];
 
-        $response = Http::withHeaders(['x-goog-api-key' => $apiKey])->connectTimeout(10)->timeout(30)->retry(2, 500)->post($url, $payload);
+        $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
+                ->withOptions(['curl' => [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]])
+                ->connectTimeout(10)
+                ->timeout(30)
+                ->retry(1, 500)
+                ->post($url, $payload);
 
         if (!$response->successful()) {
             throw new Exception("Gemini API error: " . $response->body());
@@ -107,7 +112,12 @@ class GeminiService
             // [DIAG] Step 2: sending request
             Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
 
-            $response = Http::withHeaders(['x-goog-api-key' => $apiKey])->connectTimeout(10)->timeout(30)->retry(2, 500)->post($url, $payload);
+            $response = Http::withHeaders(['x-goog-api-key' => $apiKey])
+                ->withOptions(['curl' => [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4]])
+                ->connectTimeout(10)
+                ->timeout(30)
+                ->retry(1, 500)
+                ->post($url, $payload);
 
             // [DIAG] Step 3: HTTP status received
             Log::info('[GeminiDiag] Gemini HTTP response received', [
