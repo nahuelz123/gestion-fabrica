@@ -204,6 +204,60 @@ class GeminiService
         ];
     }
 
+    /**
+     * Uses native cURL for Gemini because this exact transport is verified to
+     * work from the Railway worker. Never includes the API key in logs/URLs.
+     *
+     * @return array{status:int, successful:bool, body:string, json:array}
+     */
+    private function postWithCurl(string $url, string $apiKey, array $payload): array
+    {
+        $encodedPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        if ($encodedPayload === false) {
+            throw new Exception('Could not encode Gemini payload.');
+        }
+
+        $ch = curl_init($url);
+
+        if ($ch === false) {
+            throw new Exception('Could not initialize cURL for Gemini.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $encodedPayload,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $apiKey,
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+        ]);
+
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErrno = curl_errno($ch);
+
+        curl_close($ch);
+
+        if ($body === false) {
+            Log::error('Gemini cURL transport error', ['errno' => $curlErrno]);
+            throw new Exception('Gemini transport failed.');
+        }
+
+        $decoded = json_decode($body, true);
+
+        return [
+            'status' => $status,
+            'successful' => $status >= 200 && $status < 300,
+            'body' => $body,
+            'json' => is_array($decoded) ? $decoded : [],
+        ];
+    }
+
     private function getSystemInstruction(): string
     {
         return "Sos el asistente virtual experto de una fábrica.
