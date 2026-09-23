@@ -94,7 +94,7 @@ class ProductionCalculatorService
      * Calcula la cantidad máxima de unidades terminadas que puede fabricarse
      * con el stock actual, usando el ingrediente limitante de la receta.
      */
-    public function calculateMaxProducible(Product $product): array
+    public function calculateMaxProducible(Product $product, array $stockAdditions = []): array
     {
         $recipe = $product->recipe()->with('items.product')->first();
 
@@ -118,7 +118,8 @@ class ProductionCalculatorService
                 continue;
             }
 
-            $available = (float) $stocks->get($item->product_id, 0);
+            $available = (float) $stocks->get($item->product_id, 0)
+                + (float) ($stockAdditions[$item->product_id] ?? 0);
             $possible = floor($available / $requiredPerUnit);
 
             if ($possible < $maxUnits) {
