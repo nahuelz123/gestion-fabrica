@@ -30,16 +30,13 @@ class GeminiService
             'temperature' => 0.1,
         ];
 
-        $response = Http::withToken($apiKey)
-                ->connectTimeout(5)
-                ->timeout(45)
-                ->post($url, $payload);
+        $response = $this->postToGemini($url, $apiKey, $payload);
 
-        if (!$response->successful()) {
-            throw new Exception("Gemini API error: " . $response->body());
+        if (!$response['successful']) {
+            throw new Exception("Gemini API error: " . $response['body']);
         }
 
-        $data = $response->json();
+        $data = $response['json'];
         $jsonText = $data['choices'][0]['message']['content'] ?? '{}';
         
         return json_decode($jsonText, true) ?? ['intent' => 'unknown'];
@@ -81,27 +78,24 @@ class GeminiService
             // [DIAG] Step 2: sending request
             Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
 
-            $response = Http::withToken($apiKey)
-                ->connectTimeout(5)
-                ->timeout(45)
-                ->post($url, $payload);
+            $response = $this->postToGemini($url, $apiKey, $payload);
 
             // [DIAG] Step 3: HTTP status received
             Log::info('[GeminiDiag] Gemini HTTP response received', [
-                'status' => $response->status(),
-                'successful' => $response->successful(),
+                'status' => $response['status'],
+                'successful' => $response['successful'],
             ]);
 
-            if (!$response->successful()) {
+            if (!$response['successful']) {
                 // [DIAG] Step 4: non-2xx — log status and safe body excerpt
-                $rawBody = $response->body();
+                $rawBody = $response['body'];
                 $safeBody = mb_substr($rawBody, 0, 800); // Truncate to avoid flooding logs
-                Log::error('Gemini API HTTP error', ['status' => $response->status(), 'body' => $safeBody]);
-                Log::warning('[GeminiDiag] FALLBACK reason: HTTP non-successful', ['status' => $response->status()]);
+                Log::error('Gemini API HTTP error', ['status' => $response['status'], 'body' => $safeBody]);
+                Log::warning('[GeminiDiag] FALLBACK reason: HTTP non-successful', ['status' => $response['status']]);
                 return $this->fallbackResponse();
             }
 
-            $data = $response->json();
+            $data = $response['json'];
 
             // [DIAG] Step 5a: successful response — log top-level structure (no credentials)
             $candidateCount = count($data['choices'] ?? []);
@@ -158,6 +152,56 @@ class GeminiService
             ]);
             return $this->fallbackResponse();
         }
+    }
+
+    /**
+     * Send Gemini requests with native cURL. This mirrors the request proven to
+     * work from the Railway worker and avoids differences in the Laravel/Guzzle transport.
+     */
+    private function postToGemini(string $url, string $apiKey, array $payload): array
+    {
+        $ch = curl_init($url);
+        if ($ch === false) {
+            throw new Exception('Could not initialize cURL for Gemini.');
+        }
+
+        $encodedPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encodedPayload === false) {
+            curl_close($ch);
+            throw new Exception('Could not encode Gemini request payload.');
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $encodedPayload,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $apiKey,
+            ],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 10,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+        ]);
+
+        $body = curl_exec($ch);
+        $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $errno = curl_errno($ch);
+        curl_close($ch);
+
+        if ($body === false || $errno !== 0) {
+            Log::error('Gemini native cURL transport error', ['curl_errno' => $errno]);
+            throw new Exception('Gemini connection failed.');
+        }
+
+        $json = json_decode($body, true);
+
+        return [
+            'status' => $status,
+            'successful' => $status >= 200 && $status < 300,
+            'body' => $body,
+            'json' => is_array($json) ? $json : [],
+        ];
     }
 
     private function getSystemInstruction(): string
