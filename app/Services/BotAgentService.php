@@ -42,6 +42,31 @@ class BotAgentService
         $cancelWords = ['no', 'cancelar', 'cancelá', 'cancela', 'dejá', 'deja', 'mejor no'];
         
         $currentStatus = $context['status'] ?? 'idle';
+
+        // Confirmaciones cortas ("sí", "dale", etc.) se resuelven en Laravel usando
+        // la acción pendiente canónica. No dependemos de que Gemini reconstruya
+        // correctamente la acción a partir de una sola palabra.
+        $affirmativeWords = ['si', 'sí', 'dale', 'confirmo', 'confirmar', 'ok', 'okay', 'yes'];
+        if ($currentStatus === 'ready_for_confirmation'
+            && in_array($textNorm, $affirmativeWords, true)
+            && !empty($context['pending_action'])) {
+            $executor = app(BotActionExecutor::class);
+            $result = $executor->execute($user, $chatId, $context['pending_action'], $context);
+            $reply = $result['message'];
+            $context['status'] = $result['success'] ? 'completed' : 'idle';
+            if ($result['success']) {
+                $context['pending_action'] = null;
+            }
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+
+            DB::transaction(function () use ($conversation, $context) {
+                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
+                $lockedConv->update(['context' => $context]);
+            });
+
+            $this->telegramService->sendMessage($chatId, $reply);
+            return;
+        }
         
         if (in_array($textNorm, $cancelWords) && in_array($currentStatus, ['collecting', 'ready_for_confirmation'])) {
             $context['status'] = 'cancelled';
@@ -82,7 +107,7 @@ class BotAgentService
 
         $status = 'idle';
         $actionToExecute = null;
-        $readActions = ['get_stock', 'get_low_stock', 'get_recipe', 'calculate_production', 'check_production', 'get_missing_inputs'];
+        $readActions = ['get_stock', 'get_low_stock', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production', 'get_missing_inputs'];
         // Stock adjustment actions go through the normal confirmation flow (not readActions)
         // register_production also goes through confirmation because it modifies stock.
         // set_stock, add_stock, remove_stock each require user confirmation before execution.
