@@ -2,173 +2,126 @@
 
 namespace App\Services;
 
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Exception;
+use Illuminate\Support\Facades\Log;
 
 class GeminiService
 {
+    private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+    private const MODEL = 'gemini-3-flash-preview';
+
     /**
-     * @deprecated Use analyzeConversation instead. Kept for backward compatibility during refactoring.
+     * Compatibilidad con el flujo legado.
      */
     public function analyzeText(string $text): array
     {
-        $apiKey = config('services.gemini.api_key');
-        if (!$apiKey) {
-            throw new Exception("No Gemini API key configured.");
-        }
+        $result = $this->analyzeConversation($text, []);
 
-        $url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-
-        $payload = [
-            'model' => 'gemini-3-flash-preview',
-            'messages' => [
-                ['role' => 'system', 'content' => 'Sos el asistente virtual de un sistema de gestión de fábrica. Respondé exclusivamente con JSON válido.'],
-                ['role' => 'user', 'content' => $text],
-            ],
-            'response_format' => ['type' => 'json_object'],
-            'temperature' => 0.1,
+        return [
+            'intent' => $result['intent'] ?? 'unknown',
+            'product_name' => $result['action']['arguments']['product_name'] ?? null,
+            'quantity' => $result['action']['arguments']['quantity'] ?? null,
         ];
-
-        $response = $this->postToGemini($url, $apiKey, $payload);
-
-        if (!$response['successful']) {
-            throw new Exception("Gemini API error: " . $response['body']);
-        }
-
-        $data = $response['json'];
-        $jsonText = $data['choices'][0]['message']['content'] ?? '{}';
-        
-        return json_decode($jsonText, true) ?? ['intent' => 'unknown'];
     }
 
     public function analyzeConversation(string $text, array $context = []): array
     {
-        // [DIAG] Step 1: start
         Log::info('[GeminiDiag] analyzeConversation started', [
             'text_length' => strlen($text),
             'has_context' => !empty($context),
         ]);
 
-        $apiKey = config('services.gemini.api_key');
-        if (!$apiKey) {
+        $apiKey = (string) config('services.gemini.api_key');
+        if ($apiKey === '') {
             Log::error('GeminiService: No API key configured.');
-            Log::warning('[GeminiDiag] FALLBACK reason: no API key configured');
-            return $this->fallbackResponse();
+            return $this->fallbackResponse('La IA no está configurada en este momento.');
         }
 
-        // [DIAG] Step 2: API key exists (do NOT log the key itself)
-        Log::info('[GeminiDiag] API key present, preparing HTTP request');
-
-        $url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-
-        $prompt = $this->buildPrompt($text, $context);
-
         $payload = [
-            'model' => 'gemini-3-flash-preview',
+            'model' => self::MODEL,
             'messages' => [
-                ['role' => 'system', 'content' => $this->getSystemInstruction() . "\n\nRespondé EXCLUSIVAMENTE con un objeto JSON válido que respete esta estructura: " . json_encode($this->getResponseSchema(), JSON_UNESCAPED_UNICODE)],
-                ['role' => 'user', 'content' => $prompt],
+                [
+                    'role' => 'system',
+                    'content' => $this->getSystemInstruction()
+                        . "\n\nRespondé EXCLUSIVAMENTE con JSON válido con esta estructura: "
+                        . json_encode($this->getResponseSchema(), JSON_UNESCAPED_UNICODE),
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $this->buildPrompt($text, $context),
+                ],
             ],
             'response_format' => ['type' => 'json_object'],
             'temperature' => 0.1,
         ];
 
         try {
-            // [DIAG] Step 2: sending request
             Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
+            $response = $this->postToGemini(self::ENDPOINT, $apiKey, $payload);
 
-            $response = $this->postToGemini($url, $apiKey, $payload);
-
-            // [DIAG] Step 3: HTTP status received
             Log::info('[GeminiDiag] Gemini HTTP response received', [
                 'status' => $response['status'],
                 'successful' => $response['successful'],
             ]);
 
             if (!$response['successful']) {
-                // [DIAG] Step 4: non-2xx — log status and safe body excerpt
-                $rawBody = $response['body'];
-                $safeBody = mb_substr($rawBody, 0, 800); // Truncate to avoid flooding logs
-                Log::error('Gemini API HTTP error', ['status' => $response['status'], 'body' => $safeBody]);
-                Log::warning('[GeminiDiag] FALLBACK reason: HTTP non-successful', ['status' => $response['status']]);
+                Log::error('Gemini API HTTP error', [
+                    'status' => $response['status'],
+                    'body' => mb_substr($response['body'], 0, 800),
+                ]);
+
+                if ($response['status'] === 429) {
+                    $seconds = $this->extractRetrySeconds($response['body']);
+                    $reply = $seconds
+                        ? "Llegamos momentáneamente al límite de consultas de IA. Probá de nuevo en unos {$seconds} segundos."
+                        : 'Llegamos momentáneamente al límite de consultas de IA. Probá de nuevo en un momento.';
+
+                    return $this->fallbackResponse($reply);
+                }
+
                 return $this->fallbackResponse();
             }
 
             $data = $response['json'];
-
-            // [DIAG] Step 5a: successful response — log top-level structure (no credentials)
-            $candidateCount = count($data['choices'] ?? []);
-            $hasTextPart = isset($data['choices'][0]['message']['content']);
-            Log::info('[GeminiDiag] Gemini successful response structure', [
-                'candidate_count' => $candidateCount,
-                'has_text_part' => $hasTextPart,
-                'finish_reason' => $data['choices'][0]['finish_reason'] ?? 'N/A',
-                'prompt_feedback' => null,
-            ]);
-
             $jsonText = $data['choices'][0]['message']['content'] ?? '{}';
-
-            // [DIAG] Step 5b: log parsed keys (not values) so we can see what Gemini returned
-            $previewParsed = json_decode($jsonText, true);
-            if (is_array($previewParsed)) {
-                Log::info('[GeminiDiag] Gemini JSON keys received', [
-                    'keys' => array_keys($previewParsed),
-                    'has_reply' => isset($previewParsed['reply']),
-                    'has_action' => isset($previewParsed['action']) && !is_null($previewParsed['action']),
-                    'intent' => $previewParsed['intent'] ?? '(missing)',
-                    'action_name' => $previewParsed['action']['name'] ?? null,
-                    'action_args_keys' => isset($previewParsed['action']['arguments'])
-                        ? array_keys((array) $previewParsed['action']['arguments'])
-                        : null,
-                ]);
-            }
-
             $parsed = json_decode($jsonText, true);
 
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                // [DIAG] Step 6: JSON decode failure
-                Log::error('Gemini API JSON parse error', ['raw' => $jsonText]);
-                Log::warning('[GeminiDiag] FALLBACK reason: JSON decode failed', [
-                    'json_error' => json_last_error_msg(),
-                ]);
+            if (!is_array($parsed)) {
+                Log::error('Gemini API JSON parse error', ['raw' => mb_substr($jsonText, 0, 800)]);
                 return $this->fallbackResponse();
             }
 
-            Log::info('[GeminiDiag] JSON decoded successfully, passing to validateAndFormatResponse');
-            return $this->validateAndFormatResponse($parsed);
+            Log::info('[GeminiDiag] Gemini JSON keys received', [
+                'keys' => array_keys($parsed),
+                'intent' => $parsed['intent'] ?? '(missing)',
+                'action_name' => $parsed['action']['name'] ?? null,
+                'action_args_keys' => isset($parsed['action']['arguments'])
+                    ? array_keys((array) $parsed['action']['arguments'])
+                    : null,
+            ]);
 
+            return $this->validateAndFormatResponse($parsed);
         } catch (\Throwable $e) {
-            // [DIAG] Step 7: exception
             Log::error('Gemini API Exception', [
                 'class' => get_class($e),
-                // Never log the raw exception message here: HTTP client exceptions may
-                // contain the full request URL and could expose credentials.
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
             ]);
-            Log::warning('[GeminiDiag] FALLBACK reason: exception thrown', [
-                'exception_class' => get_class($e),
-            ]);
+
             return $this->fallbackResponse();
         }
     }
 
-    /**
-     * Send Gemini requests with native cURL. This mirrors the request proven to
-     * work from the Railway worker and avoids differences in the Laravel/Guzzle transport.
-     */
     private function postToGemini(string $url, string $apiKey, array $payload): array
     {
+        $encodedPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($encodedPayload === false) {
+            throw new Exception('Could not encode Gemini payload.');
+        }
+
         $ch = curl_init($url);
         if ($ch === false) {
             throw new Exception('Could not initialize cURL for Gemini.');
-        }
-
-        $encodedPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if ($encodedPayload === false) {
-            curl_close($ch);
-            throw new Exception('Could not encode Gemini request payload.');
         }
 
         curl_setopt_array($ch, [
@@ -205,178 +158,136 @@ class GeminiService
 
     private function getSystemInstruction(): string
     {
-        return "Sos el asistente virtual experto de una fábrica.
-Reglas estrictas:
-1. NUNCA ejecutes sentencias SQL ni código. Eres un intérprete de lenguaje natural.
-2. Comprendé el contexto. Si el usuario te da una cantidad, y estábamos creando un producto, es el stock inicial o rendimiento, según el contexto.
-3. Si el usuario corrige información ('me equivoqué, eran 25', 'no, paquete de 1000', 'insumo'), actualizá las entidades en lugar de iniciar una acción nueva.
-4. Identificá referencias naturales ('ese producto', 'el anterior', 'lo mismo pero') indicando la necesidad de resolver la entidad.
-5. NO inventes acciones ni nombres. Usá solo los definidos.
-6. Si una acción requiere confirmación y los datos están listos, pedí confirmación. NO preguntes datos que ya se encuentran en el contexto.
-7. Las acciones (action.name) PERMITIDAS EXCLUSIVAMENTE SON:
-create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, unknown.
-8. Si el usuario confirma ('sí', 'dale') y hay una acción lista, emite el action correspondiente y requiere confirmación false.
-9. Para set_stock: cuando el usuario dice 'el stock de X es Y' o 'establecé stock de X en Y'. Si informa varios ('Nuevo inventario: X es Y, Z es W'), pasá un array 'items' dentro de arguments con [{product_name, quantity}].
-10. Para add_stock: cuando el usuario dice 'sumá/agregá N de X'.
-11. Para remove_stock: cuando el usuario dice 'usamos/restá N de X' o informa un consumo.
-12. Si el usuario pregunta cuánto/máximo puede producir, cuántos carros/carritos/bandejas puede hacer, usá get_max_production. Es una acción de lectura: NO requiere confirmación y NO necesita quantity. En contexto de producción, 'cheddar' refiere al producto terminado correspondiente. Si plantea un escenario hipotético ('si agrego 1000 bolsitas', 'si compro 3 cajas de pan', 'suponiendo que entran...'), NO uses add_stock ni modifiques inventario: mantené get_max_production y agregá arguments.hypothetical_stock_additions = [{product_name, quantity, presentation_name}]. Conservá product_name del producto terminado desde el contexto reciente si el usuario no lo repite.
-13. Para register_production: cuando el usuario informa producción terminada. Incluir carros y bandejas como argumentos (carros, bandejas, quantity). 1 carro = 12 bandejas = 288 u. Si el usuario informa consumos reales (ej: 'usamos 7 piezas de bacon'), pasá un array 'actual_consumptions' en arguments con [{product_name, quantity, presentation_name}]. Si corrige un consumo, actualizalo y pedí confirmación de nuevo (requires_confirmation=true).";
+        return <<<'PROMPT'
+Sos el asistente virtual de una fábrica. Hablás en español argentino, entendés lenguaje natural y usás el contexto de la conversación.
+
+Tu trabajo es INTERPRETAR. Laravel valida y ejecuta. Nunca inventes SQL ni ejecutes cambios por tu cuenta.
+
+Reglas:
+1. No obligues al usuario a escribir nombres exactos. Conservá la forma natural; Laravel resolverá singular/plural, tildes y coincidencias del catálogo.
+2. Usá el contexto. Frases como "ese", "el anterior", "de todos", "y si además...", "sumale...", "lo mismo pero..." deben continuar la conversación anterior.
+3. No preguntes un dato que ya aparece en provided_context, last_read_action, pending_action o mensajes recientes.
+4. Las acciones de LECTURA no requieren confirmación: get_stock, get_low_stock, get_expiring_products, get_stock_movements, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production.
+5. Las acciones que MODIFICAN datos siempre requieren confirmación: create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, create_recipe, update_recipe.
+6. "Dame un resumen del stock", "stock de todo", "cómo estamos de mercadería", "inventario completo" => get_stock con product_name="all".
+7. "Qué tenemos bajo", "qué falta", "stock crítico" => get_low_stock.
+8. "Qué vence", "próximos vencimientos" => get_expiring_products. Si menciona días, mandá days.
+9. "Qué movimientos hubo", "qué se cargó hoy", "historial de stock" => get_stock_movements. Podés mandar limit.
+10. "Cuántos carros/carritos/bandejas podemos hacer" => get_max_production. 1 carro = 12 bandejas = 288 unidades; 1 bandeja = 24.
+11. Escenarios hipotéticos como "si agrego 1000 bolsitas" NO cambian stock. Usá hypothetical_stock_additions dentro de get_max_production o plan_production.
+12. Si el usuario continúa una simulación con "y si además...", preservá las simulaciones anteriores desde el contexto y agregá la nueva.
+13. "Mañana quiero hacer 4 carros de cheddar, 2 de bacon y 3 de pollo" => plan_production con production_items. No modifica stock.
+14. Para ingresos reales: "compramos", "entraron", "recibimos", "sumá" => add_stock/register_stock y requiere confirmación. Conservá presentation_name (caja, paquete, barra, etc.).
+15. Si el usuario corrige una operación pendiente ("no, eran 8 cajas"), actualizá la misma acción y volvé a pedir confirmación.
+16. Cuando diga "Sí", "dale", "confirmo", si hay pending_action, devolvé esa misma acción con requires_confirmation=false.
+17. No inventes conversiones físicas. Si el usuario dice caja/paquete/barra, preservá presentation_name para que Laravel use la presentación registrada.
+
+Acciones permitidas exclusivamente:
+create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production, unknown.
+PROMPT;
     }
 
     private function buildPrompt(string $text, array $context): string
     {
         return json_encode([
             'current_message' => $text,
-            'provided_context' => $context
+            'provided_context' => $context,
         ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
     }
 
     private function getResponseSchema(): array
     {
-        return [
+        $productItem = [
             'type' => 'OBJECT',
             'properties' => [
-                'intent' => [
-                    'type' => 'STRING',
-                    'enum' => [
-                        'create_product', 'update_product', 'register_stock', 'adjust_stock',
-                        'set_stock', 'add_stock', 'remove_stock', 'register_production',
-                        'get_stock', 'get_low_stock', 'get_expiring_products', 'create_recipe',
-                        'update_recipe', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production',
-                        'get_missing_inputs', 'unknown'
-                    ]
-                ],
-                'reply' => ['type' => 'STRING', 'description' => 'Respuesta amigable para el usuario'],
-                'entities' => [
-                    'type' => 'OBJECT',
-                    'properties' => [
-                        'name' => ['type' => 'STRING', 'nullable' => true],
-                        'presentation' => ['type' => 'STRING', 'nullable' => true],
-                        'type' => ['type' => 'STRING', 'nullable' => true],
-                        'quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                        'initial_stock' => ['type' => 'NUMBER', 'nullable' => true]
-                    ]
-                ],
-                'action' => [
-                    'type' => 'OBJECT',
-                    'nullable' => true,
-                    'properties' => [
-                        'name' => ['type' => 'STRING'],
-                        'arguments' => [
-                            'type' => 'OBJECT',
-                            'properties' => [
-                                'name' => ['type' => 'STRING', 'nullable' => true],
-                                'presentation' => ['type' => 'STRING', 'nullable' => true],
-                                'product_name' => ['type' => 'STRING', 'nullable' => true],
-                                'presentation_name' => ['type' => 'STRING', 'nullable' => true],
-                                'quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                                'initial_stock' => ['type' => 'NUMBER', 'nullable' => true],
-                                'type' => ['type' => 'STRING', 'nullable' => true],
-                                'yield_quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                                'target_quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                                'carros' => ['type' => 'NUMBER', 'nullable' => true],
-                                'bandejas' => ['type' => 'NUMBER', 'nullable' => true],
-                                'hypothetical_stock_additions' => [
-                                    'type' => 'ARRAY',
-                                    'nullable' => true,
-                                    'items' => [
-                                        'type' => 'OBJECT',
-                                        'properties' => [
-                                            'product_name' => ['type' => 'STRING'],
-                                            'quantity' => ['type' => 'NUMBER'],
-                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
-                                        ]
-                                    ]
-                                ],
-                                'items' => [
-                                    'type' => 'ARRAY',
-                                    'nullable' => true,
-                                    'items' => [
-                                        'type' => 'OBJECT',
-                                        'properties' => [
-                                            'product_name' => ['type' => 'STRING', 'nullable' => true],
-                                            'quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
-                                        ]
-                                    ]
-                                ],
-                                'actual_consumptions' => [
-                                    'type' => 'ARRAY',
-                                    'nullable' => true,
-                                    'items' => [
-                                        'type' => 'OBJECT',
-                                        'properties' => [
-                                            'product_name' => ['type' => 'STRING', 'nullable' => true],
-                                            'quantity' => ['type' => 'NUMBER', 'nullable' => true],
-                                            'presentation_name' => ['type' => 'STRING', 'nullable' => true],
-                                        ]
-                                    ]
-                                ]
-                            ]
-                        ]
-                    ]
-                ],
-                'missing' => [
-                    'type' => 'ARRAY',
-                    'items' => ['type' => 'STRING']
-                ],
-                'requires_confirmation' => ['type' => 'BOOLEAN'],
-                'confidence' => ['type' => 'NUMBER']
+                'product_name' => ['type' => 'STRING', 'nullable' => true],
+                'quantity' => ['type' => 'NUMBER', 'nullable' => true],
+                'presentation_name' => ['type' => 'STRING', 'nullable' => true],
+                'carros' => ['type' => 'NUMBER', 'nullable' => true],
+                'bandejas' => ['type' => 'NUMBER', 'nullable' => true],
             ],
-            'required' => ['intent', 'reply', 'entities', 'missing', 'requires_confirmation', 'confidence']
+        ];
+
+        return [
+            'intent' => 'string',
+            'reply' => 'string',
+            'entities' => 'object',
+            'action' => [
+                'name' => 'string|null',
+                'arguments' => [
+                    'product_name' => 'string|null',
+                    'presentation_name' => 'string|null',
+                    'quantity' => 'number|null',
+                    'carros' => 'number|null',
+                    'bandejas' => 'number|null',
+                    'days' => 'number|null',
+                    'limit' => 'number|null',
+                    'items' => [$productItem],
+                    'production_items' => [$productItem],
+                    'actual_consumptions' => [$productItem],
+                    'hypothetical_stock_additions' => [$productItem],
+                ],
+            ],
+            'missing' => ['string'],
+            'requires_confirmation' => 'boolean',
+            'confidence' => 'number',
         ];
     }
 
     private function validateAndFormatResponse(array $parsed): array
     {
-        $validActionsAndIntents = [
+        $valid = [
             'create_product', 'update_product', 'register_stock', 'adjust_stock',
             'set_stock', 'add_stock', 'remove_stock', 'register_production',
-            'get_stock', 'get_low_stock', 'get_expiring_products', 'create_recipe',
-            'update_recipe', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production',
-            'get_missing_inputs', 'unknown'
+            'get_stock', 'get_low_stock', 'get_expiring_products', 'get_stock_movements',
+            'create_recipe', 'update_recipe', 'get_recipe', 'calculate_production',
+            'check_production', 'get_max_production', 'get_missing_inputs',
+            'plan_production', 'unknown',
         ];
 
-        $intent = in_array($parsed['intent'] ?? '', $validActionsAndIntents) ? $parsed['intent'] : 'unknown';
-        
+        $intent = in_array($parsed['intent'] ?? '', $valid, true)
+            ? $parsed['intent']
+            : 'unknown';
+
         $action = null;
         if (isset($parsed['action']) && is_array($parsed['action'])) {
-            $actionName = $parsed['action']['name'] ?? null;
-            $actionArgs = $parsed['action']['arguments'] ?? [];
-            
-            if (
-                is_string($actionName) && 
-                in_array($actionName, $validActionsAndIntents) && 
-                is_array($actionArgs)
-            ) {
-                $action = [
-                    'name' => $actionName,
-                    'arguments' => $actionArgs
-                ];
+            $name = $parsed['action']['name'] ?? null;
+            $args = $parsed['action']['arguments'] ?? [];
+            if (is_string($name) && in_array($name, $valid, true) && is_array($args)) {
+                $action = ['name' => $name, 'arguments' => $args];
             }
         }
 
         return [
             'intent' => $intent,
-            'reply' => $parsed['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.',
-            'entities' => $parsed['entities'] ?? [],
+            'reply' => (string) ($parsed['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.'),
+            'entities' => is_array($parsed['entities'] ?? null) ? $parsed['entities'] : [],
             'action' => $action,
             'missing' => is_array($parsed['missing'] ?? null) ? $parsed['missing'] : [],
             'requires_confirmation' => (bool) ($parsed['requires_confirmation'] ?? false),
-            'confidence' => (float) ($parsed['confidence'] ?? 0.0)
+            'confidence' => (float) ($parsed['confidence'] ?? 0.0),
         ];
     }
 
-    private function fallbackResponse(): array
+    private function extractRetrySeconds(string $body): ?int
+    {
+        if (preg_match('/retry in\s+([0-9.]+)s/i', $body, $matches)) {
+            return max(1, (int) ceil((float) $matches[1]));
+        }
+
+        return null;
+    }
+
+    private function fallbackResponse(string $reply = 'Tuve un problema procesando eso. Probá nuevamente.'): array
     {
         return [
             'intent' => 'unknown',
-            'reply' => 'Tuve un problema procesando eso. Probá nuevamente.',
+            'reply' => $reply,
             'entities' => [],
             'action' => null,
             'missing' => [],
             'requires_confirmation' => false,
-            'confidence' => 0.0
+            'confidence' => 0.0,
         ];
     }
 }
