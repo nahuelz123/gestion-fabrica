@@ -152,14 +152,14 @@ class FlexibleBotActionExecutor extends BotActionExecutor
 
         if ($presentation && (float) $presentation->conversion_factor > 1) {
             $factor = (float) $presentation->conversion_factor;
-            $physical = $qty / $factor;
-            $complete = (int) floor($physical);
+            $complete = (int) floor($qty / $factor);
             $remainder = $qty - ($complete * $factor);
+            $presentationName = $this->presentationLabel($presentation->name, $complete);
 
             if (abs($remainder) < 0.00001) {
-                $line .= " ({$complete} {$presentation->name})";
+                $line .= " ({$complete} {$presentationName})";
             } else {
-                $line .= " ({$this->formatNumber($physical)} {$presentation->name})";
+                $line .= " ({$complete} {$presentationName} + {$this->formatNumber($remainder)} {$baseUnit})";
             }
         }
 
@@ -169,31 +169,56 @@ class FlexibleBotActionExecutor extends BotActionExecutor
     private function executeGetLowStock(int $companyId): array
     {
         $products = Product::where('company_id', $companyId)
-            ->where('min_stock', '>', 0)
             ->with(['baseUnit', 'stocks'])
             ->orderBy('name')
             ->get();
 
+        if ($products->isEmpty()) {
+            return ['success' => true, 'message' => 'No hay productos cargados todavía.'];
+        }
+
+        $noStock = [];
         $low = [];
+        $withoutMinimum = 0;
+
         foreach ($products as $product) {
             $qty = (float) $product->stocks->sum('quantity');
             $min = (float) $product->min_stock;
-            if ($qty <= $min) {
-                $unit = $product->baseUnit->abbreviation ?? 'u';
+            $unit = $product->baseUnit->abbreviation ?? 'u';
+
+            if ($qty <= 0.00001) {
+                $noStock[] = "- {$product->name}: 0 {$unit}";
+            } elseif ($min > 0 && $qty <= $min) {
                 $low[] = "- {$product->name}: {$this->formatNumber($qty)} {$unit} (mínimo {$this->formatNumber($min)})";
+            }
+
+            if ($min <= 0) {
+                $withoutMinimum++;
             }
         }
 
-        if (!$low) {
-            return [
-                'success' => true,
-                'message' => $products->isEmpty()
-                    ? 'Todavía no hay mínimos de stock configurados.'
-                    : '✅ No hay productos por debajo del stock mínimo.',
-            ];
+        $sections = [];
+
+        if ($noStock) {
+            $sections[] = "🔴 Sin stock:\n" . implode("\n", $noStock);
         }
 
-        return ['success' => true, 'message' => "⚠️ Stock bajo:\n" . implode("\n", $low)];
+        if ($low) {
+            $sections[] = "⚠️ Debajo del mínimo:\n" . implode("\n", $low);
+        }
+
+        if (!$noStock && !$low) {
+            $sections[] = '✅ No hay productos sin stock ni por debajo del mínimo.';
+        }
+
+        if ($withoutMinimum > 0) {
+            $noun = $withoutMinimum === 1 ? 'producto' : 'productos';
+            $sections[] = "ℹ️ {$withoutMinimum} {$noun} todavía no "
+                . ($withoutMinimum === 1 ? 'tiene' : 'tienen')
+                . ' stock mínimo configurado.';
+        }
+
+        return ['success' => true, 'message' => implode("\n\n", $sections)];
     }
 
     private function executeGetExpiringProducts(int $companyId, int $days): array
@@ -533,6 +558,36 @@ class FlexibleBotActionExecutor extends BotActionExecutor
             return mb_substr($word, 0, -1);
         }
         return $word;
+    }
+
+    private function presentationLabel(string $name, int $count): string
+    {
+        if ($count === 1) {
+            return $name;
+        }
+
+        return preg_replace_callback('/^(\p{L}+)(.*)$/u', function (array $matches) {
+            return $this->pluralizeWord($matches[1]) . $matches[2];
+        }, $name) ?? $name;
+    }
+
+    private function pluralizeWord(string $word): string
+    {
+        $lower = mb_strtolower($word);
+
+        if (str_ends_with($lower, 'z')) {
+            return mb_substr($word, 0, -1) . 'ces';
+        }
+
+        if (preg_match('/[aeiouáéíóú]$/u', $lower)) {
+            return $word . 's';
+        }
+
+        if (str_ends_with($lower, 's')) {
+            return $word;
+        }
+
+        return $word . 'es';
     }
 
     private function formatNumber(float $value): string
