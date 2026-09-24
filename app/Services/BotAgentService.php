@@ -2,13 +2,8 @@
 
 namespace App\Services;
 
-use App\Enums\Channel;
-use App\Enums\MovementType;
 use App\Models\AiConversation;
-use App\Models\Product;
-use App\Models\Stock;
 use App\Models\User;
-use Exception;
 use Illuminate\Support\Facades\DB;
 
 class BotAgentService
@@ -27,300 +22,252 @@ class BotAgentService
             ['telegram_chat_id' => $chatId]
         );
 
-        // Fallback for legacy conversations (pending_action exists, but no context)
-        if (!empty($conversation->pending_action) && empty($conversation->context)) {
-            $this->legacyProcessMessage($conversation, $user, $chatId, $text);
+        $context = is_array($conversation->context) ? $conversation->context : [];
+
+        // Compatibilidad con conversaciones viejas que sólo tenían pending_action.
+        if (empty($context) && !empty($conversation->pending_action)) {
+            $context = [
+                'status' => 'ready_for_confirmation',
+                'pending_action' => $conversation->pending_action,
+                'recent_messages' => [],
+            ];
+        }
+
+        $context = $this->addRecentMessage($context, 'user', $text);
+        $textNorm = trim(mb_strtolower($text));
+        $currentStatus = $context['status'] ?? 'idle';
+
+        $cancelWords = ['no', 'cancelar', 'cancelá', 'cancela', 'dejá', 'deja', 'mejor no'];
+        if (in_array($textNorm, $cancelWords, true)
+            && in_array($currentStatus, ['collecting', 'ready_for_confirmation'], true)) {
+            $context['status'] = 'cancelled';
+            $context['pending_action'] = null;
+            $reply = 'Operación cancelada.';
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $reply);
             return;
         }
 
-        // --- NEW CONVERSATIONAL FLOW ---
-        $context = $conversation->context ?? [];
-        $context = $this->addRecentMessage($context, 'user', $text);
-
-        // Manual strict cancellation check
-        $textNorm = trim(mb_strtolower($text));
-        $cancelWords = ['no', 'cancelar', 'cancelá', 'cancela', 'dejá', 'deja', 'mejor no'];
-        
-        $currentStatus = $context['status'] ?? 'idle';
-
-        // Confirmaciones cortas ("sí", "dale", etc.) se resuelven en Laravel usando
-        // la acción pendiente canónica. No dependemos de que Gemini reconstruya
-        // correctamente la acción a partir de una sola palabra.
+        // Las confirmaciones cortas se resuelven en Laravel con la acción pendiente
+        // exacta. Así no dependemos de que Gemini reconstruya una operación sensible.
         $affirmativeWords = ['si', 'sí', 'dale', 'confirmo', 'confirmar', 'ok', 'okay', 'yes'];
         if ($currentStatus === 'ready_for_confirmation'
             && in_array($textNorm, $affirmativeWords, true)
             && !empty($context['pending_action'])) {
-            $executor = app(BotActionExecutor::class);
-            $result = $executor->execute($user, $chatId, $context['pending_action'], $context);
+            $result = app(BotActionExecutor::class)->execute(
+                $user,
+                $chatId,
+                $context['pending_action'],
+                $context
+            );
+
             $reply = $result['message'];
             $context['status'] = $result['success'] ? 'completed' : 'idle';
             if ($result['success']) {
+                $context['last_completed_action'] = $context['pending_action'];
                 $context['pending_action'] = null;
             }
-            $context = $this->addRecentMessage($context, 'assistant', $reply);
 
-            DB::transaction(function () use ($conversation, $context) {
-                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
-                $lockedConv->update(['context' => $context]);
-            });
-
-            $this->telegramService->sendMessage($chatId, $reply);
-            return;
-        }
-        
-        if (in_array($textNorm, $cancelWords) && in_array($currentStatus, ['collecting', 'ready_for_confirmation'])) {
-            $context['status'] = 'cancelled';
-            $reply = 'Operación cancelada.';
             $context = $this->addRecentMessage($context, 'assistant', $reply);
-            
-            DB::transaction(function () use ($conversation, $context) {
-                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
-                $lockedConv->update(['context' => $context]);
-            });
-            
+            $this->saveContext($conversation, $context);
             $this->telegramService->sendMessage($chatId, $reply);
             return;
         }
 
         $analysis = $this->geminiService->analyzeConversation($text, $context);
 
-        if ($analysis['intent'] === 'unknown' && empty($analysis['action'])) {
-            $context = $this->addRecentMessage($context, 'assistant', $analysis['reply']);
-            
-            DB::transaction(function () use ($conversation, $context) {
-                $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
-                $lockedConv->update(['context' => $context]);
-            });
-            
-            $this->telegramService->sendMessage($chatId, $analysis['reply']);
+        if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
+            $reply = $analysis['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.';
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $reply);
             return;
         }
 
         $previousStatus = $context['status'] ?? 'idle';
         $previousIntent = $context['intent'] ?? null;
+        $context['intent'] = $analysis['intent'] ?? 'unknown';
+        $context['entities'] = array_merge(
+            $context['entities'] ?? [],
+            array_filter($analysis['entities'] ?? [], fn ($value) => $value !== null && $value !== '')
+        );
 
-        // Update context based on Gemini analysis
-        $context['intent'] = $analysis['intent'];
-        
-        // Merge entities to preserve previous ones
-        $context['entities'] = array_merge($context['entities'] ?? [], array_filter($analysis['entities'] ?? []));
+        $action = is_array($analysis['action'] ?? null) ? $analysis['action'] : null;
+        if ($action) {
+            $action = $this->enrichActionFromContext($action, $context, $textNorm);
+        }
+
+        $readActions = [
+            'get_stock',
+            'get_low_stock',
+            'get_expiring_products',
+            'get_stock_movements',
+            'get_recipe',
+            'calculate_production',
+            'check_production',
+            'get_max_production',
+            'get_missing_inputs',
+            'plan_production',
+        ];
 
         $status = 'idle';
         $actionToExecute = null;
-        $readActions = ['get_stock', 'get_low_stock', 'get_recipe', 'calculate_production', 'check_production', 'get_max_production', 'get_missing_inputs'];
-        // Stock adjustment actions go through the normal confirmation flow (not readActions)
-        // register_production also goes through confirmation because it modifies stock.
-        // set_stock, add_stock, remove_stock each require user confirmation before execution.
+        $actionName = $action['name'] ?? '';
 
-        if ($analysis['requires_confirmation']) {
+        if (!empty($analysis['requires_confirmation']) && $action) {
             $status = 'ready_for_confirmation';
-            $context['pending_action'] = $analysis['action'];
-        } elseif (!empty($analysis['action']) && !$analysis['requires_confirmation']) {
-            $actionName = $analysis['action']['name'] ?? '';
-            
-            if (in_array($actionName, $readActions)) {
-                // Read actions can be executed immediately
+            $context['pending_action'] = $action;
+        } elseif ($action && in_array($actionName, $readActions, true)) {
+            $status = 'confirmed';
+            $actionToExecute = $action;
+        } elseif ($action) {
+            // Toda modificación necesita confirmación previa. Incluso si Gemini se olvida
+            // de pedirla, Laravel la fuerza.
+            if ($previousStatus === 'ready_for_confirmation'
+                && $previousIntent === ($analysis['intent'] ?? null)
+                && !empty($context['pending_action'])) {
                 $status = 'confirmed';
-                $actionToExecute = $analysis['action'];
+                $actionToExecute = $context['pending_action'];
             } else {
-                // Mutating actions MUST have been previously confirmed by the user
-                if ($previousStatus === 'ready_for_confirmation' && $previousIntent === $analysis['intent']) {
-                    // Safe to execute. Use the stored pending_action as the canonical source
-                    // to avoid Gemini injecting a different action at the last second
-                    $status = 'confirmed';
-                    $actionToExecute = $context['pending_action'] ?? $analysis['action'];
-                } else {
-                    // Gemini sent a mutating action without confirmation!
-                    // Demote to ready_for_confirmation
-                    $status = 'ready_for_confirmation';
-                    $context['pending_action'] = $analysis['action'];
-                }
+                $status = 'ready_for_confirmation';
+                $context['pending_action'] = $action;
             }
         } elseif (!empty($analysis['missing'])) {
             $status = 'collecting';
         }
 
         $context['status'] = $status;
-        $reply = $analysis['reply'];
+        $reply = $analysis['reply'] ?? '¿Podés darme un poco más de detalle?';
 
-        // EXECUTION
         if ($status === 'confirmed' && $actionToExecute) {
-            $executor = app(BotActionExecutor::class);
-            $result = $executor->execute($user, $chatId, $actionToExecute, $context);
-            
+            $result = app(BotActionExecutor::class)->execute(
+                $user,
+                $chatId,
+                $actionToExecute,
+                $context
+            );
+
             $reply = $result['message'];
-            
             if ($result['success']) {
                 $context['status'] = 'completed';
                 $context['pending_action'] = null;
+
+                if (in_array($actionToExecute['name'] ?? '', $readActions, true)) {
+                    $context['last_read_action'] = $actionToExecute;
+                    $this->rememberUsefulReferences($context, $actionToExecute);
+                } else {
+                    $context['last_completed_action'] = $actionToExecute;
+                }
             } else {
-                // Keep it idle or ready to let the user retry
                 $context['status'] = 'idle';
             }
         }
 
         $context = $this->addRecentMessage($context, 'assistant', $reply);
-        
-        DB::transaction(function () use ($conversation, $context) {
-            $lockedConv = AiConversation::whereKey($conversation->id)->lockForUpdate()->firstOrFail();
-            $lockedConv->update(['context' => $context]);
-        });
-
+        $this->saveContext($conversation, $context);
         $this->telegramService->sendMessage($chatId, $reply);
+    }
+
+    private function enrichActionFromContext(array $action, array $context, string $textNorm): array
+    {
+        $name = $action['name'] ?? '';
+        $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+        $last = is_array($context['last_read_action'] ?? null) ? $context['last_read_action'] : [];
+        $lastArgs = is_array($last['arguments'] ?? null) ? $last['arguments'] : [];
+
+        // Referencias como "¿y si agrego...?" conservan el producto terminado anterior.
+        if (empty($args['product_name'])
+            && in_array($name, ['get_max_production', 'calculate_production', 'check_production', 'get_missing_inputs'], true)) {
+            $args['product_name'] = $lastArgs['product_name']
+                ?? ($context['last_product_name'] ?? null);
+        }
+
+        // Las simulaciones se pueden encadenar: +1000 bolsitas, y después +10 cajas de medallones.
+        $isContinuation = str_starts_with($textNorm, 'y ')
+            || str_contains($textNorm, 'además')
+            || str_contains($textNorm, 'ademas')
+            || str_contains($textNorm, 'sumale')
+            || str_contains($textNorm, 'agregale')
+            || str_contains($textNorm, 'agregá')
+            || str_contains($textNorm, 'agrega');
+
+        if ($name === 'get_max_production' && $isContinuation) {
+            $previousAdditions = is_array($lastArgs['hypothetical_stock_additions'] ?? null)
+                ? $lastArgs['hypothetical_stock_additions']
+                : [];
+            $currentAdditions = is_array($args['hypothetical_stock_additions'] ?? null)
+                ? $args['hypothetical_stock_additions']
+                : [];
+
+            if ($previousAdditions && $currentAdditions) {
+                $args['hypothetical_stock_additions'] = array_values(array_merge(
+                    $previousAdditions,
+                    $currentAdditions
+                ));
+            }
+        }
+
+        // Una continuación de un plan conserva los escenarios hipotéticos previos.
+        if ($name === 'plan_production' && $isContinuation) {
+            $previousAdditions = is_array($lastArgs['hypothetical_stock_additions'] ?? null)
+                ? $lastArgs['hypothetical_stock_additions']
+                : [];
+            $currentAdditions = is_array($args['hypothetical_stock_additions'] ?? null)
+                ? $args['hypothetical_stock_additions']
+                : [];
+            if ($previousAdditions && $currentAdditions) {
+                $args['hypothetical_stock_additions'] = array_values(array_merge($previousAdditions, $currentAdditions));
+            }
+        }
+
+        $action['arguments'] = array_filter(
+            $args,
+            fn ($value) => $value !== null,
+        );
+
+        return $action;
+    }
+
+    private function rememberUsefulReferences(array &$context, array $action): void
+    {
+        $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+
+        if (!empty($args['product_name'])) {
+            $context['last_product_name'] = $args['product_name'];
+        }
+
+        if (($action['name'] ?? '') === 'plan_production' && !empty($args['production_items'])) {
+            $context['last_production_plan'] = $args['production_items'];
+        }
     }
 
     private function addRecentMessage(array $context, string $role, string $text): array
     {
-        $messages = $context['recent_messages'] ?? [];
+        $messages = is_array($context['recent_messages'] ?? null)
+            ? $context['recent_messages']
+            : [];
+
         $messages[] = ['role' => $role, 'text' => $text];
-        
-        if (count($messages) > 10) {
-            $messages = array_slice($messages, -10);
+        if (count($messages) > 12) {
+            $messages = array_slice($messages, -12);
         }
-        
+
         $context['recent_messages'] = $messages;
         return $context;
     }
 
-    /**
-     * @deprecated Legacy flow
-     */
-    private function legacyProcessMessage(AiConversation $conversation, User $user, string $chatId, string $text): void
+    private function saveContext(AiConversation $conversation, array $context): void
     {
-        $proceedToFlowB = false;
+        DB::transaction(function () use ($conversation, $context) {
+            $locked = AiConversation::whereKey($conversation->id)
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        DB::transaction(function () use ($conversation, $user, $chatId, $text, &$proceedToFlowB) {
-            $conversation = AiConversation::where('user_id', $user->id)->lockForUpdate()->first();
-
-            if (app()->environment('testing') && env('TEST_BOT_SLEEP')) {
-                sleep(3);
-            }
-
-            if ($conversation && $conversation->pending_action) {
-                $textNorm = trim(mb_strtolower($text));
-                $affirmative = ['si', 'sí', 'dale', 'confirmo', 'ok', 'yes'];
-                $negative = ['no', 'cancelar', 'cancela'];
-
-                if (in_array($textNorm, $affirmative)) {
-                    try {
-                        $actionData = $conversation->pending_action;
-                        if (isset($actionData['type']) && is_string($actionData['type'])) {
-                            $actionData['type'] = MovementType::from($actionData['type']);
-                        }
-                        if (isset($actionData['channel']) && is_string($actionData['channel'])) {
-                            $actionData['channel'] = Channel::from($actionData['channel']);
-                        }
-
-                        $this->stockService->registerMovement($actionData);
-                        $conversation->update(['pending_action' => null]);
-                        $this->telegramService->sendMessage($chatId, '✅ Ingreso registrado correctamente en el inventario.');
-                    } catch (Exception $e) {
-                        $conversation->update(['pending_action' => null]);
-                        $this->telegramService->sendMessage($chatId, '❌ No pude registrarlo: ' . $e->getMessage());
-                    }
-                    return; 
-                } elseif (in_array($textNorm, $negative)) {
-                    $conversation->update(['pending_action' => null]);
-                    $this->telegramService->sendMessage($chatId, '❌ Operación cancelada.');
-                    return;
-                } else {
-                    $conversation->update(['pending_action' => null]);
-                    $proceedToFlowB = true;
-                }
-            } else {
-                $proceedToFlowB = true;
-            }
+            $locked->update([
+                'context' => $context,
+                'pending_action' => $context['pending_action'] ?? null,
+            ]);
         });
-
-        if (!$proceedToFlowB) {
-            return;
-        }
-
-        try {
-            $analysis = $this->geminiService->analyzeText($text);
-            $intent = $analysis['intent'] ?? 'unknown';
-            $productName = $analysis['product_name'] ?? null;
-            $quantity = $analysis['quantity'] ?? null;
-
-            if ($intent === 'unknown' || !$productName) {
-                $this->telegramService->sendMessage($chatId, 'No entendí lo que necesitás. Podés consultarme stock, pedirme simular una producción, o informarme ingresos de mercadería.');
-                return;
-            }
-
-            $products = Product::where('company_id', $user->company_id)
-                ->where('name', 'like', "%{$productName}%")
-                ->get();
-
-            if ($products->count() === 0) {
-                $this->telegramService->sendMessage($chatId, "No encontré ningún producto registrado con el nombre '{$productName}'.");
-                return;
-            }
-
-            if ($products->count() > 1) {
-                $names = $products->pluck('name')->implode(', ');
-                $this->telegramService->sendMessage($chatId, "Encontré varios productos que coinciden: {$names}. ¿Cuál es exactamente?");
-                return;
-            }
-
-            $product = $products->first();
-
-            if ($intent === 'check_stock') {
-                $stock = Stock::where('product_id', $product->id)->sum('quantity');
-                $unit = $product->baseUnit->abbreviation ?? 'ud';
-                $this->telegramService->sendMessage($chatId, "Tenés <b>{$stock} {$unit}</b> de {$product->name} en total.");
-                
-            } elseif ($intent === 'calculate_production') {
-                if (!$quantity) {
-                    $this->telegramService->sendMessage($chatId, "¿Qué cantidad de {$product->name} querés producir?");
-                    return;
-                }
-                
-                $result = $this->productionCalculator->calculateRequirements($product, (float) $quantity);
-                
-                $msg = "Simulación para <b>{$quantity} {$product->name}</b>:\n\n";
-                if ($result['can_produce']) {
-                    $msg .= "✅ <b>Stock suficiente</b>\n";
-                } else {
-                    $msg .= "❌ <b>Falta stock de insumos</b>\n";
-                }
-                
-                foreach ($result['items'] as $item) {
-                    $faltante = $item['missing'] > 0 ? " (Faltan {$item['missing']})" : "";
-                    $msg .= "- {$item['ingredient']->name}: Req {$item['required']} / Hay {$item['available']}{$faltante}\n";
-                }
-                
-                $this->telegramService->sendMessage($chatId, $msg);
-
-            } elseif ($intent === 'propose_stock_entry') {
-                if (!$quantity) {
-                    $this->telegramService->sendMessage($chatId, "¿Qué cantidad de {$product->name} ingresó?");
-                    return;
-                }
-
-                $warehouseId = \App\Models\Warehouse::where('company_id', $user->company_id)->first()->id;
-
-                $data = [
-                    'company_id' => $user->company_id,
-                    'product_id' => $product->id,
-                    'warehouse_id' => $warehouseId,
-                    'type' => MovementType::AdjustmentIn->value,
-                    'quantity_base' => (float) $quantity,
-                    'user_id' => $user->id,
-                    'channel' => Channel::Telegram->value,
-                ];
-
-                AiConversation::updateOrCreate(
-                    ['user_id' => $user->id],
-                    ['telegram_chat_id' => $chatId, 'pending_action' => $data]
-                );
-
-                $unit = $product->baseUnit->abbreviation ?? 'ud';
-                $this->telegramService->sendMessage($chatId, "¿Confirmo el ingreso de <b>{$quantity} {$unit}</b> de {$product->name}? (Respondé 'Sí' o 'No')");
-            }
-
-        } catch (Exception $e) {
-            $this->telegramService->sendMessage($chatId, "Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
-        }
     }
 }
-
