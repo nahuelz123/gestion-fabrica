@@ -4,7 +4,7 @@ namespace App\Providers;
 
 use App\Models\User;
 use App\Services\BotActionExecutor;
-use App\Services\FlexibleBotActionExecutor;
+use App\Services\BulkBotActionExecutor;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
@@ -16,7 +16,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(BotActionExecutor::class, FlexibleBotActionExecutor::class);
+        $this->app->bind(BotActionExecutor::class, BulkBotActionExecutor::class);
     }
 
     /**
