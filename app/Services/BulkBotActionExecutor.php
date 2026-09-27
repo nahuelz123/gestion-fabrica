@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Channel;
 use App\Enums\MovementType;
 use App\Models\Product;
+use App\Models\ProductAlias;
 use App\Models\Stock;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -122,18 +123,23 @@ class BulkBotActionExecutor extends FlexibleBotActionExecutor
                 }
             });
         } catch (Throwable $e) {
+            report($e);
             return [
                 'success' => false,
                 'message' => 'No pude completar el ingreso masivo. No se aplicó ningún cambio.',
             ];
         }
 
+        $productIds = collect($prepared)->pluck('product.id')->all();
+        $stocks = Stock::where('company_id', $companyId)
+            ->whereIn('product_id', $productIds)
+            ->selectRaw('product_id, SUM(quantity) as total_stock')
+            ->groupBy('product_id')
+            ->pluck('total_stock', 'product_id');
+
         $lines = ['✅ Stock actualizado:'];
         foreach ($prepared as $entry) {
-            $current = (float) Stock::where('company_id', $companyId)
-                ->where('product_id', $entry['product']->id)
-                ->sum('quantity');
-
+            $current = (float) $stocks->get($entry['product']->id, 0);
             $addedLabel = $entry['presentation']
                 ? $this->formatNumber($entry['quantity']) . ' ' . $entry['presentation']->name
                 : $this->formatNumber($entry['quantity']) . ' u';
@@ -148,39 +154,77 @@ class BulkBotActionExecutor extends FlexibleBotActionExecutor
 
     private function resolveProductForBulk(int $companyId, string $input): ?Product
     {
-        $needle = $this->normalize($input);
-        $products = Product::where('company_id', $companyId)->get();
-
-        foreach ($products as $product) {
-            if ($this->normalize($product->name) === $needle) {
-                return $product;
-            }
+        $input = trim($input);
+        if ($input === '') {
+            return null;
         }
 
+        // 1) Coincidencia exacta por nombre: usa índice company+name.
+        $exact = Product::where('company_id', $companyId)
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($input)])
+            ->first();
+        if ($exact) {
+            return $exact;
+        }
+
+        // 2) Alias exacto: evita fuzzy matching costoso y permite lenguaje de fábrica.
+        $alias = ProductAlias::where('company_id', $companyId)
+            ->whereRaw('LOWER(alias) = ?', [mb_strtolower($input)])
+            ->with('product')
+            ->first();
+        if ($alias?->product) {
+            return $alias->product;
+        }
+
+        // 3) Preselección acotada por tokens. Nunca cargamos miles de productos en memoria.
         $needleTokens = $this->tokens($input);
+        if (!$needleTokens) {
+            return null;
+        }
+
+        $candidates = Product::where('company_id', $companyId)
+            ->where(function ($query) use ($needleTokens) {
+                foreach (array_slice($needleTokens, 0, 4) as $token) {
+                    $query->orWhere('name', 'like', '%' . $token . '%')
+                        ->orWhereHas('aliases', fn ($aliasQuery) => $aliasQuery->where('alias', 'like', '%' . $token . '%'));
+                }
+            })
+            ->with('aliases:id,product_id,alias')
+            ->limit(60)
+            ->get();
+
         $best = null;
         $bestScore = 0;
+        $tied = false;
 
-        foreach ($products as $product) {
-            $tokens = $this->tokens($product->name);
-            $matches = count(array_intersect($needleTokens, $tokens));
-            if ($matches === 0) {
-                continue;
-            }
+        foreach ($candidates as $product) {
+            $labels = collect([$product->name])
+                ->merge($product->aliases->pluck('alias'));
 
-            $coverage = $matches / max(1, count($needleTokens));
-            if ($coverage < 0.6) {
-                continue;
-            }
+            foreach ($labels as $label) {
+                $tokens = $this->tokens((string) $label);
+                $matches = count(array_intersect($needleTokens, $tokens));
+                if ($matches === 0) {
+                    continue;
+                }
 
-            $score = (int) round($coverage * 100) - abs(count($tokens) - count($needleTokens));
-            if ($score > $bestScore) {
-                $best = $product;
-                $bestScore = $score;
+                $coverage = $matches / max(1, count($needleTokens));
+                if ($coverage < 0.6) {
+                    continue;
+                }
+
+                $score = (int) round($coverage * 100) - abs(count($tokens) - count($needleTokens));
+                if ($score > $bestScore) {
+                    $best = $product;
+                    $bestScore = $score;
+                    $tied = false;
+                } elseif ($score === $bestScore && $best && $best->id !== $product->id) {
+                    $tied = true;
+                }
             }
         }
 
-        return $best;
+        return $tied ? null : $best;
     }
 
     private function resolvePresentationForBulk(Product $product, ?string $input)
