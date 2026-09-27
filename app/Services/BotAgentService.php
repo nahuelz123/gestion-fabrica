@@ -12,7 +12,8 @@ class BotAgentService
         private TelegramService $telegramService,
         private GeminiService $geminiService,
         private StockService $stockService,
-        private ProductionCalculatorService $productionCalculator
+        private ProductionCalculatorService $productionCalculator,
+        private BotActionPreviewService $previewService,
     ) {}
 
     public function processMessage(User $user, string $chatId, string $text): void
@@ -49,8 +50,6 @@ class BotAgentService
         }
 
         // ÚNICA vía para ejecutar una escritura pendiente: confirmación explícita.
-        // Esto evita que una corrección tipo "eran 8, no 10" ejecute accidentalmente
-        // la versión anterior de la operación.
         $affirmativeWords = ['si', 'sí', 'dale', 'confirmo', 'confirmar', 'ok', 'okay', 'yes'];
         if ($currentStatus === 'ready_for_confirmation'
             && in_array($textNorm, $affirmativeWords, true)
@@ -112,21 +111,23 @@ class BotAgentService
         $status = 'idle';
         $actionToExecute = null;
         $actionName = $action['name'] ?? '';
+        $previewReply = null;
 
         if ($action && in_array($actionName, $readActions, true)) {
             $status = 'confirmed';
             $actionToExecute = $action;
         } elseif ($action) {
-            // Toda escritura queda pendiente SIEMPRE. Gemini puede interpretar y corregir
-            // la acción, pero nunca autorizar su ejecución por sí solo.
+            // Toda escritura queda pendiente SIEMPRE. Una corrección reemplaza la
+            // acción pendiente y vuelve a pedir confirmación.
             $status = 'ready_for_confirmation';
             $context['pending_action'] = $action;
+            $previewReply = $this->previewService->preview($user, $action);
         } elseif (!empty($analysis['missing'])) {
             $status = 'collecting';
         }
 
         $context['status'] = $status;
-        $reply = $analysis['reply'] ?? '¿Podés darme un poco más de detalle?';
+        $reply = $previewReply ?? ($analysis['reply'] ?? '¿Podés darme un poco más de detalle?');
 
         if ($status === 'confirmed' && $actionToExecute) {
             $result = app(BotActionExecutor::class)->execute(
