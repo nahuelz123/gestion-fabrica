@@ -47,19 +47,18 @@ class Product extends Model
         static::creating(function (Product $product) {
             if (empty($product->internal_code)) {
                 $prefix = 'PRD-';
-                // Find highest existing number for this company
                 $latest = Product::where('company_id', $product->company_id)
                     ->where('internal_code', 'like', "{$prefix}%")
                     ->lockForUpdate()
                     ->orderByRaw('CAST(SUBSTRING(internal_code, 5) AS UNSIGNED) DESC')
                     ->first();
-                
+
                 $nextNumber = 1;
                 if ($latest) {
                     $number = (int) substr($latest->internal_code, 4);
                     $nextNumber = $number + 1;
                 }
-                
+
                 do {
                     $code = $prefix . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
                     $exists = Product::where('company_id', $product->company_id)
@@ -92,6 +91,11 @@ class Product extends Model
     public function presentations(): HasMany
     {
         return $this->hasMany(ProductPresentation::class);
+    }
+
+    public function aliases(): HasMany
+    {
+        return $this->hasMany(ProductAlias::class);
     }
 
     public function recipe(): \Illuminate\Database\Eloquent\Relations\HasOne
