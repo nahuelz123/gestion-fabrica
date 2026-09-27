@@ -24,7 +24,6 @@ class BotAgentService
 
         $context = is_array($conversation->context) ? $conversation->context : [];
 
-        // Compatibilidad con conversaciones viejas que sólo tenían pending_action.
         if (empty($context) && !empty($conversation->pending_action)) {
             $context = [
                 'status' => 'ready_for_confirmation',
@@ -49,8 +48,9 @@ class BotAgentService
             return;
         }
 
-        // Las confirmaciones cortas se resuelven en Laravel con la acción pendiente
-        // exacta. Así no dependemos de que Gemini reconstruya una operación sensible.
+        // ÚNICA vía para ejecutar una escritura pendiente: confirmación explícita.
+        // Esto evita que una corrección tipo "eran 8, no 10" ejecute accidentalmente
+        // la versión anterior de la operación.
         $affirmativeWords = ['si', 'sí', 'dale', 'confirmo', 'confirmar', 'ok', 'okay', 'yes'];
         if ($currentStatus === 'ready_for_confirmation'
             && in_array($textNorm, $affirmativeWords, true)
@@ -85,8 +85,6 @@ class BotAgentService
             return;
         }
 
-        $previousStatus = $context['status'] ?? 'idle';
-        $previousIntent = $context['intent'] ?? null;
         $context['intent'] = $analysis['intent'] ?? 'unknown';
         $context['entities'] = array_merge(
             $context['entities'] ?? [],
@@ -115,24 +113,14 @@ class BotAgentService
         $actionToExecute = null;
         $actionName = $action['name'] ?? '';
 
-        if (!empty($analysis['requires_confirmation']) && $action) {
-            $status = 'ready_for_confirmation';
-            $context['pending_action'] = $action;
-        } elseif ($action && in_array($actionName, $readActions, true)) {
+        if ($action && in_array($actionName, $readActions, true)) {
             $status = 'confirmed';
             $actionToExecute = $action;
         } elseif ($action) {
-            // Toda modificación necesita confirmación previa. Incluso si Gemini se olvida
-            // de pedirla, Laravel la fuerza.
-            if ($previousStatus === 'ready_for_confirmation'
-                && $previousIntent === ($analysis['intent'] ?? null)
-                && !empty($context['pending_action'])) {
-                $status = 'confirmed';
-                $actionToExecute = $context['pending_action'];
-            } else {
-                $status = 'ready_for_confirmation';
-                $context['pending_action'] = $action;
-            }
+            // Toda escritura queda pendiente SIEMPRE. Gemini puede interpretar y corregir
+            // la acción, pero nunca autorizar su ejecución por sí solo.
+            $status = 'ready_for_confirmation';
+            $context['pending_action'] = $action;
         } elseif (!empty($analysis['missing'])) {
             $status = 'collecting';
         }
@@ -152,13 +140,8 @@ class BotAgentService
             if ($result['success']) {
                 $context['status'] = 'completed';
                 $context['pending_action'] = null;
-
-                if (in_array($actionToExecute['name'] ?? '', $readActions, true)) {
-                    $context['last_read_action'] = $actionToExecute;
-                    $this->rememberUsefulReferences($context, $actionToExecute);
-                } else {
-                    $context['last_completed_action'] = $actionToExecute;
-                }
+                $context['last_read_action'] = $actionToExecute;
+                $this->rememberUsefulReferences($context, $actionToExecute);
             } else {
                 $context['status'] = 'idle';
             }
@@ -176,14 +159,12 @@ class BotAgentService
         $last = is_array($context['last_read_action'] ?? null) ? $context['last_read_action'] : [];
         $lastArgs = is_array($last['arguments'] ?? null) ? $last['arguments'] : [];
 
-        // Referencias como "¿y si agrego...?" conservan el producto terminado anterior.
         if (empty($args['product_name'])
             && in_array($name, ['get_max_production', 'calculate_production', 'check_production', 'get_missing_inputs'], true)) {
             $args['product_name'] = $lastArgs['product_name']
                 ?? ($context['last_product_name'] ?? null);
         }
 
-        // Las simulaciones se pueden encadenar: +1000 bolsitas, y después +10 cajas de medallones.
         $isContinuation = str_starts_with($textNorm, 'y ')
             || str_contains($textNorm, 'además')
             || str_contains($textNorm, 'ademas')
@@ -201,14 +182,10 @@ class BotAgentService
                 : [];
 
             if ($previousAdditions && $currentAdditions) {
-                $args['hypothetical_stock_additions'] = array_values(array_merge(
-                    $previousAdditions,
-                    $currentAdditions
-                ));
+                $args['hypothetical_stock_additions'] = array_values(array_merge($previousAdditions, $currentAdditions));
             }
         }
 
-        // Una continuación de un plan conserva los escenarios hipotéticos previos.
         if ($name === 'plan_production' && $isContinuation) {
             $previousAdditions = is_array($lastArgs['hypothetical_stock_additions'] ?? null)
                 ? $lastArgs['hypothetical_stock_additions']
