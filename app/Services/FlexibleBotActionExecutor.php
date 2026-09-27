@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\ProductAlias;
 use App\Models\Stock;
 use App\Models\StockLot;
 use App\Models\StockMovement;
@@ -88,8 +89,6 @@ class FlexibleBotActionExecutor extends BotActionExecutor
             }
         }
 
-        // Cuando el usuario informa una presentación física (cajas, paquetes, barras),
-        // usamos add_stock porque ese flujo convierte la presentación a unidades base.
         if (in_array($name, ['register_stock', 'adjust_stock'], true)
             && !empty($args['presentation_name'])) {
             $name = 'add_stock';
@@ -104,7 +103,8 @@ class FlexibleBotActionExecutor extends BotActionExecutor
     private function executeGetAllStock(int $companyId): array
     {
         $products = Product::where('company_id', $companyId)
-            ->with(['baseUnit', 'presentations', 'stocks'])
+            ->with(['baseUnit:id,abbreviation', 'presentations:id,product_id,name,conversion_factor,is_purchase_default'])
+            ->withSum('stocks as total_stock', 'quantity')
             ->orderBy('type')
             ->orderBy('name')
             ->get();
@@ -117,7 +117,7 @@ class FlexibleBotActionExecutor extends BotActionExecutor
         $finished = [];
 
         foreach ($products as $product) {
-            $qty = (float) $product->stocks->sum('quantity');
+            $qty = (float) ($product->total_stock ?? 0);
             $line = $this->stockLine($product, $qty);
             $type = $product->type instanceof \BackedEnum ? $product->type->value : (string) $product->type;
 
@@ -168,21 +168,29 @@ class FlexibleBotActionExecutor extends BotActionExecutor
 
     private function executeGetLowStock(int $companyId): array
     {
+        $withoutMinimum = Product::where('company_id', $companyId)
+            ->where(function ($query) {
+                $query->whereNull('min_stock')->orWhere('min_stock', '<=', 0);
+            })
+            ->count();
+
         $products = Product::where('company_id', $companyId)
-            ->with(['baseUnit', 'stocks'])
+            ->with('baseUnit:id,abbreviation')
+            ->withSum('stocks as total_stock', 'quantity')
+            ->havingRaw('COALESCE(total_stock, 0) <= 0 OR (min_stock IS NOT NULL AND min_stock > 0 AND COALESCE(total_stock, 0) <= min_stock)')
             ->orderBy('name')
+            ->limit(200)
             ->get();
 
-        if ($products->isEmpty()) {
+        if ($products->isEmpty() && $withoutMinimum === 0) {
             return ['success' => true, 'message' => 'No hay productos cargados todavía.'];
         }
 
         $noStock = [];
         $low = [];
-        $withoutMinimum = 0;
 
         foreach ($products as $product) {
-            $qty = (float) $product->stocks->sum('quantity');
+            $qty = (float) ($product->total_stock ?? 0);
             $min = (float) $product->min_stock;
             $unit = $product->baseUnit->abbreviation ?? 'u';
 
@@ -190,10 +198,6 @@ class FlexibleBotActionExecutor extends BotActionExecutor
                 $noStock[] = "- {$product->name}: 0 {$unit}";
             } elseif ($min > 0 && $qty <= $min) {
                 $low[] = "- {$product->name}: {$this->formatNumber($qty)} {$unit} (mínimo {$this->formatNumber($min)})";
-            }
-
-            if ($min <= 0) {
-                $withoutMinimum++;
             }
         }
 
@@ -231,6 +235,7 @@ class FlexibleBotActionExecutor extends BotActionExecutor
             ->where('expiration_date', '<=', $until)
             ->with('product')
             ->orderBy('expiration_date')
+            ->limit(500)
             ->get();
 
         $lines = [];
@@ -260,7 +265,7 @@ class FlexibleBotActionExecutor extends BotActionExecutor
         $limit = max(1, min($limit ?: 10, 30));
 
         $movements = StockMovement::where('company_id', $companyId)
-            ->with(['product', 'user'])
+            ->with(['product:id,name', 'user:id,name'])
             ->latest('created_at')
             ->limit($limit)
             ->get();
@@ -447,18 +452,66 @@ class FlexibleBotActionExecutor extends BotActionExecutor
 
     private function resolveFinishedProduct(int $companyId, string $input): ?Product
     {
-        return $this->resolveProductFromCollection(
-            Product::where('company_id', $companyId)->where('type', 'finished_product')->get(),
-            $input
-        );
+        return $this->resolveProductQuery($companyId, $input, 'finished_product');
     }
 
     private function resolveProduct(int $companyId, string $input): ?Product
     {
-        return $this->resolveProductFromCollection(
-            Product::where('company_id', $companyId)->get(),
-            $input
-        );
+        return $this->resolveProductQuery($companyId, $input, null);
+    }
+
+    private function resolveProductQuery(int $companyId, string $input, ?string $type): ?Product
+    {
+        $input = trim($input);
+        if ($input === '') {
+            return null;
+        }
+
+        $baseQuery = Product::query()->where('company_id', $companyId);
+        if ($type) {
+            $baseQuery->where('type', $type);
+        }
+
+        $exact = (clone $baseQuery)
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($input)])
+            ->first();
+        if ($exact) {
+            return $exact;
+        }
+
+        $aliasQuery = ProductAlias::query()
+            ->where('product_aliases.company_id', $companyId)
+            ->whereRaw('LOWER(alias) = ?', [mb_strtolower($input)])
+            ->whereHas('product', function ($query) use ($companyId, $type) {
+                $query->where('company_id', $companyId);
+                if ($type) $query->where('type', $type);
+            })
+            ->with('product');
+
+        $alias = $aliasQuery->first();
+        if ($alias?->product) {
+            return $alias->product;
+        }
+
+        $queryTokens = $this->tokens($input);
+        if (!$queryTokens) {
+            return null;
+        }
+
+        $candidates = (clone $baseQuery)
+            ->where(function ($query) use ($queryTokens) {
+                foreach (array_slice($queryTokens, 0, 4) as $token) {
+                    $query->orWhere('name', 'like', '%' . $token . '%')
+                        ->orWhereHas('aliases', function ($aliasQuery) use ($token) {
+                            $aliasQuery->where('alias', 'like', '%' . $token . '%');
+                        });
+                }
+            })
+            ->with('aliases:id,product_id,alias')
+            ->limit(60)
+            ->get();
+
+        return $this->resolveProductFromCollection($candidates, $input);
     }
 
     private function resolveProductFromCollection($products, string $input): ?Product
@@ -478,31 +531,34 @@ class FlexibleBotActionExecutor extends BotActionExecutor
         $tied = false;
 
         foreach ($products as $product) {
-            $normalizedProduct = $this->normalize($product->name);
-            $productTokens = $this->tokens($product->name);
-            $matches = count(array_intersect($queryTokens, $productTokens));
-
-            if ($normalizedInput === $normalizedProduct) {
-                $score = 1000;
-            } elseif (str_contains($normalizedProduct, $normalizedInput) || str_contains($normalizedInput, $normalizedProduct)) {
-                $score = 500 + ($matches * 20);
-            } else {
-                if ($matches === 0) {
-                    continue;
-                }
-                $coverage = $matches / count($queryTokens);
-                if ($coverage < 0.6) {
-                    continue;
-                }
-                $score = (int) round($coverage * 100) + ($matches * 10) - abs(count($productTokens) - count($queryTokens));
+            $labels = collect([$product->name]);
+            if ($product->relationLoaded('aliases')) {
+                $labels = $labels->merge($product->aliases->pluck('alias'));
             }
 
-            if ($score > $bestScore) {
-                $best = $product;
-                $bestScore = $score;
-                $tied = false;
-            } elseif ($score === $bestScore && $score > 0) {
-                $tied = true;
+            foreach ($labels as $label) {
+                $normalizedProduct = $this->normalize((string) $label);
+                $productTokens = $this->tokens((string) $label);
+                $matches = count(array_intersect($queryTokens, $productTokens));
+
+                if ($normalizedInput === $normalizedProduct) {
+                    $score = 1000;
+                } elseif (str_contains($normalizedProduct, $normalizedInput) || str_contains($normalizedInput, $normalizedProduct)) {
+                    $score = 500 + ($matches * 20);
+                } else {
+                    if ($matches === 0) continue;
+                    $coverage = $matches / count($queryTokens);
+                    if ($coverage < 0.6) continue;
+                    $score = (int) round($coverage * 100) + ($matches * 10) - abs(count($productTokens) - count($queryTokens));
+                }
+
+                if ($score > $bestScore) {
+                    $best = $product;
+                    $bestScore = $score;
+                    $tied = false;
+                } elseif ($score === $bestScore && $score > 0 && $best && $best->id !== $product->id) {
+                    $tied = true;
+                }
             }
         }
 
