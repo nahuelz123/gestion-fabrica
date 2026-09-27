@@ -13,14 +13,17 @@
         </div>
     @endif
 
-    {{-- Search --}}
-    <div class="mb-4">
-        <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar por nombre, código o código de barras..."
+    <div class="mb-4 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar por nombre, alias, código o código de barras..."
                class="w-full sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
+        <select wire:model.live="perPage" class="rounded-md border-gray-300 text-sm px-3 py-2 border">
+            <option value="25">25 por página</option>
+            <option value="50">50 por página</option>
+            <option value="100">100 por página</option>
+        </select>
     </div>
 
-    {{-- Products table --}}
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>
@@ -50,15 +53,13 @@
                                 {{ $product->type->label() }}
                             </span>
                         </td>
-                        <td class="px-4 py-3 text-sm text-gray-600">
-                            {{ $product->presentation }}
-                        </td>
+                        <td class="px-4 py-3 text-sm text-gray-600">{{ $product->presentation }}</td>
                         <td class="px-4 py-3">
                             <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium {{ $product->isActive() ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800' }}">
                                 {{ $product->status->label() }}
                             </span>
                         </td>
-                        <td class="px-4 py-3 text-right text-sm font-medium space-x-2">
+                        <td class="px-4 py-3 text-right text-sm font-medium space-x-2 whitespace-nowrap">
                             <a href="{{ route('recipes.manager', $product->id) }}" wire:navigate class="text-green-600 hover:text-green-900">Receta</a>
                             <a href="{{ route('products.edit', $product->id) }}" wire:navigate class="text-blue-600 hover:text-blue-900">Editar</a>
                             <button wire:click="delete({{ $product->id }})"
@@ -68,12 +69,14 @@
                     </tr>
                 @empty
                     <tr>
-                        <td colspan="8" class="px-4 py-8 text-center text-gray-400">
-                            No se encontraron productos.
-                        </td>
+                        <td colspan="6" class="px-4 py-8 text-center text-gray-400">No se encontraron productos.</td>
                     </tr>
                 @endforelse
             </tbody>
         </table>
+    </div>
+
+    <div class="mt-4">
+        {{ $products->links() }}
     </div>
 </div>
