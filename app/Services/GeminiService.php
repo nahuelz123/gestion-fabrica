@@ -8,7 +8,6 @@ use Illuminate\Support\Facades\Log;
 class GeminiService
 {
     private const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-    private const MODEL = 'gemini-3-flash-preview';
 
     /**
      * Compatibilidad con el flujo legado.
@@ -38,7 +37,6 @@ class GeminiService
         }
 
         $payload = [
-            'model' => self::MODEL,
             'messages' => [
                 [
                     'role' => 'system',
@@ -56,17 +54,19 @@ class GeminiService
         ];
 
         try {
-            Log::info('[GeminiDiag] Sending HTTP POST to Gemini');
-            $response = $this->postToGemini(self::ENDPOINT, $apiKey, $payload);
+            $response = $this->requestWithResilience($apiKey, $payload);
 
             Log::info('[GeminiDiag] Gemini HTTP response received', [
                 'status' => $response['status'],
                 'successful' => $response['successful'],
+                'model' => $response['model'] ?? null,
+                'attempt' => $response['attempt'] ?? null,
             ]);
 
             if (!$response['successful']) {
                 Log::error('Gemini API HTTP error', [
                     'status' => $response['status'],
+                    'model' => $response['model'] ?? null,
                     'body' => mb_substr($response['body'], 0, 800),
                 ]);
 
@@ -77,6 +77,12 @@ class GeminiService
                         : 'Llegamos momentáneamente al límite de consultas de IA. Probá de nuevo en un momento.';
 
                     return $this->fallbackResponse($reply);
+                }
+
+                if ($response['status'] === 503) {
+                    return $this->fallbackResponse(
+                        'La IA está con mucha demanda en este momento. Ya intenté nuevamente y también usé el modelo de respaldo. Probá otra vez en unos segundos.'
+                    );
                 }
 
                 return $this->fallbackResponse();
@@ -108,8 +114,72 @@ class GeminiService
                 'line' => $e->getLine(),
             ]);
 
-            return $this->fallbackResponse();
+            return $this->fallbackResponse(
+                'No pude comunicarme con la IA en este momento. Probá nuevamente en unos segundos.'
+            );
         }
+    }
+
+    private function requestWithResilience(string $apiKey, array $basePayload): array
+    {
+        $primaryModel = (string) config('services.gemini.model', 'gemini-3-flash-preview');
+        $fallbackModel = (string) config('services.gemini.fallback_model', 'gemini-3.8-flash');
+
+        $plan = [
+            ['model' => $primaryModel, 'delay_ms' => 0],
+            ['model' => $primaryModel, 'delay_ms' => 1200],
+            ['model' => $primaryModel, 'delay_ms' => 2800],
+        ];
+
+        if ($fallbackModel !== '' && $fallbackModel !== $primaryModel) {
+            $plan[] = ['model' => $fallbackModel, 'delay_ms' => 800];
+        }
+
+        $lastResponse = null;
+
+        foreach ($plan as $index => $step) {
+            if ($step['delay_ms'] > 0) {
+                usleep($step['delay_ms'] * 1000);
+            }
+
+            $payload = $basePayload;
+            $payload['model'] = $step['model'];
+
+            Log::info('[GeminiDiag] Sending HTTP POST to Gemini', [
+                'attempt' => $index + 1,
+                'model' => $step['model'],
+            ]);
+
+            $response = $this->postToGemini(self::ENDPOINT, $apiKey, $payload);
+            $response['model'] = $step['model'];
+            $response['attempt'] = $index + 1;
+            $lastResponse = $response;
+
+            if ($response['successful']) {
+                return $response;
+            }
+
+            // Sólo reintentamos saturación temporal. Errores de auth, payload o cuota
+            // no mejoran repitiendo inmediatamente la misma petición.
+            if ($response['status'] !== 503) {
+                return $response;
+            }
+
+            Log::warning('[GeminiDiag] Gemini unavailable, retrying', [
+                'attempt' => $index + 1,
+                'model' => $step['model'],
+                'status' => $response['status'],
+            ]);
+        }
+
+        return $lastResponse ?? [
+            'status' => 503,
+            'successful' => false,
+            'body' => '',
+            'json' => [],
+            'model' => $primaryModel,
+            'attempt' => 0,
+        ];
     }
 
     private function postToGemini(string $url, string $apiKey, array $payload): array
