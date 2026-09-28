@@ -49,6 +49,12 @@ Route::middleware('auth')->group(function () {
     // Production
     Route::get('/produccion/calculadora', \App\Livewire\Production\Calculator::class)->name('production.calculator');
 
+    // Máquinas expendedoras / Mercado Pago
+    Route::get('/maquinas/comercios/{partner}/mercadopago/conectar', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'connect'])
+        ->name('vending.mercadopago.connect');
+    Route::get('/mercadopago/oauth/callback', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'callback'])
+        ->name('vending.mercadopago.callback');
+
     Route::post('/logout', function () {
         auth()->logout();
         session()->invalidate();
@@ -59,3 +65,7 @@ Route::middleware('auth')->group(function () {
 
 Route::post('/telegram/webhook', [\App\Http\Controllers\Api\TelegramWebhookController::class, 'handle'])
     ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+
+Route::post('/mercadopago/webhook', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'webhook'])
+    ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class])
+    ->name('vending.mercadopago.webhook');
