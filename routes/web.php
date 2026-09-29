@@ -32,19 +32,25 @@ Route::middleware('auth')->group(function () {
     Route::get('/productos/{productId}/receta', \App\Livewire\Recipes\Manager::class)->name('recipes.manager');
     Route::get('/produccion/calculadora', \App\Livewire\Production\Calculator::class)->name('production.calculator');
 
-    // Máquinas expendedoras
-    Route::get('/maquinas', \App\Livewire\Vending\Index::class)->name('vending.index');
-    Route::get('/maquinas/crear', \App\Livewire\Vending\MachineForm::class)->name('vending.machines.create');
-    Route::get('/maquinas/{id}/editar', \App\Livewire\Vending\MachineForm::class)->name('vending.machines.edit');
-    Route::get('/maquinas/ventas', \App\Livewire\Vending\Sales::class)->name('vending.sales');
+    // Máquinas expendedoras: además del Gate dentro de cada componente,
+    // las rutas quedan bloqueadas a nivel HTTP para usuarios que no sean dueños.
+    Route::middleware('can:owner-only')->group(function () {
+        Route::get('/maquinas', \App\Livewire\Vending\Index::class)->name('vending.index');
+        Route::get('/maquinas/ventas', \App\Livewire\Vending\Sales::class)->name('vending.sales');
 
-    Route::get('/maquinas/comercios', \App\Livewire\Vending\PartnersIndex::class)->name('vending.partners.index');
-    Route::get('/maquinas/comercios/crear', \App\Livewire\Vending\PartnerForm::class)->name('vending.partners.create');
-    Route::get('/maquinas/comercios/{id}/editar', \App\Livewire\Vending\PartnerForm::class)->name('vending.partners.edit');
-    Route::get('/maquinas/comercios/{partner}/mercadopago/conectar', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'connect'])
-        ->name('vending.mercadopago.connect');
-    Route::get('/mercadopago/oauth/callback', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'callback'])
-        ->name('vending.mercadopago.callback');
+        Route::get('/maquinas/comercios', \App\Livewire\Vending\PartnersIndex::class)->name('vending.partners.index');
+        Route::get('/maquinas/comercios/crear', \App\Livewire\Vending\PartnerForm::class)->name('vending.partners.create');
+        Route::get('/maquinas/comercios/{id}/editar', \App\Livewire\Vending\PartnerForm::class)->whereNumber('id')->name('vending.partners.edit');
+        Route::get('/maquinas/comercios/{partner}/mercadopago/conectar', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'connect'])
+            ->whereNumber('partner')
+            ->name('vending.mercadopago.connect');
+
+        Route::get('/maquinas/crear', \App\Livewire\Vending\MachineForm::class)->name('vending.machines.create');
+        Route::get('/maquinas/{id}/editar', \App\Livewire\Vending\MachineForm::class)->whereNumber('id')->name('vending.machines.edit');
+
+        Route::get('/mercadopago/oauth/callback', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'callback'])
+            ->name('vending.mercadopago.callback');
+    });
 
     Route::post('/logout', function () {
         auth()->logout();
@@ -54,9 +60,10 @@ Route::middleware('auth')->group(function () {
     })->name('logout');
 });
 
-// Pantalla pública para la tablet instalada en la máquina. El token es aleatorio
-// y no expone credenciales ni datos internos de comisión.
+// Pantalla pública para la tablet instalada en la máquina. El token aleatorio
+// evita exponer IDs internos y las respuestas no contienen credenciales ni comisión.
 Route::get('/maquina/{token}', \App\Http\Controllers\VendingTabletController::class)
+    ->where('token', '[A-Za-z0-9]{40,64}')
     ->name('vending.tablet');
 
 Route::post('/telegram/webhook', [\App\Http\Controllers\Api\TelegramWebhookController::class, 'handle'])
