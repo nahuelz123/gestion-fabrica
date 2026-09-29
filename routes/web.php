@@ -3,6 +3,7 @@
 use App\Livewire\Auth\Login;
 use App\Livewire\Dashboard;
 use App\Livewire\Products;
+use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
@@ -56,12 +57,14 @@ Route::middleware(['auth', 'active'])->group(function () {
     })->name('logout');
 });
 
+// Pantalla pública y de sólo lectura para la tablet. No inicia sesión ni crea
+// cookies de sesión/CSRF, reduciendo superficie de ataque y datos innecesarios.
 Route::get('/maquina/{token}', \App\Http\Controllers\VendingTabletController::class)
-    ->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class])
+    ->withoutMiddleware([StartSession::class, ShareErrorsFromSession::class, VerifyCsrfToken::class])
     ->name('vending.tablet');
 
 Route::post('/telegram/webhook', [\App\Http\Controllers\Api\TelegramWebhookController::class, 'handle'])
-    ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+    ->withoutMiddleware([VerifyCsrfToken::class]);
 Route::post('/mercadopago/webhook', [\App\Http\Controllers\Api\MercadoPagoVendingController::class, 'webhook'])
-    ->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class])
+    ->withoutMiddleware([VerifyCsrfToken::class])
     ->name('vending.mercadopago.webhook');
