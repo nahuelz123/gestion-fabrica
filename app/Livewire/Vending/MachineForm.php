@@ -20,6 +20,8 @@ class MachineForm extends Component
     public string $name = '';
     public ?int $vending_partner_id = null;
     public ?int $product_id = null;
+    public string $partnerSearch = '';
+    public string $productSearch = '';
     public string $location = '';
     public string $sale_price = '';
     public string $capacity = '';
@@ -31,12 +33,16 @@ class MachineForm extends Component
         Gate::authorize('owner-only');
         if (!$id) return;
 
-        $machine = VendingMachine::where('company_id', auth()->user()->company_id)->findOrFail($id);
+        $machine = VendingMachine::where('company_id', auth()->user()->company_id)
+            ->with(['partner:id,name', 'product:id,name'])
+            ->findOrFail($id);
         $this->machineId = $machine->id;
         $this->code = $machine->code;
         $this->name = $machine->name;
         $this->vending_partner_id = $machine->vending_partner_id;
         $this->product_id = $machine->product_id;
+        $this->partnerSearch = (string) ($machine->partner?->name ?? '');
+        $this->productSearch = (string) ($machine->product?->name ?? '');
         $this->location = (string) $machine->location;
         $this->sale_price = (string) $machine->sale_price;
         $this->capacity = (string) ($machine->capacity ?? '');
@@ -46,6 +52,7 @@ class MachineForm extends Component
 
     public function save(MercadoPagoVendingService $service): void
     {
+        Gate::authorize('owner-only');
         $companyId = auth()->user()->company_id;
         $data = $this->validate([
             'code' => ['required', 'string', 'max:50', Rule::unique('vending_machines', 'code')->where('company_id', $companyId)->ignore($this->machineId)],
@@ -77,9 +84,6 @@ class MachineForm extends Component
             || (int) $machine->vending_partner_id !== (int) $this->vending_partner_id
             || (int) $machine->product_id !== (int) $this->product_id;
 
-        // Si cambia el cobro, el comercio o la máquina queda vacía/inactiva,
-        // primero anulamos la order anterior en Mercado Pago. Así un QR guardado
-        // no puede seguir cobrando un precio viejo o vender sin stock.
         if ($machine->exists
             && ($forceOrder || $this->status !== 'active' || (int) $this->loaded_units <= 0)
             && $machine->partner?->hasMercadoPagoConnection()) {
@@ -117,9 +121,47 @@ class MachineForm extends Component
 
     public function render()
     {
+        Gate::authorize('owner-only');
         $companyId = auth()->user()->company_id;
-        $partners = VendingPartner::where('company_id', $companyId)->where('status', 'active')->orderBy('name')->get(['id', 'name', 'mercadopago_user_id']);
-        $products = Product::where('company_id', $companyId)->where('type', 'finished_product')->orderBy('name')->get(['id', 'name']);
+        $partnerSearch = trim($this->partnerSearch);
+        $productSearch = trim($this->productSearch);
+
+        $partners = VendingPartner::query()
+            ->where('company_id', $companyId)
+            ->where(function ($q) {
+                $q->where('status', 'active');
+                if ($this->vending_partner_id) $q->orWhere('id', $this->vending_partner_id);
+            })
+            ->when($partnerSearch !== '', fn ($q) => $q->where('name', 'like', "%{$partnerSearch}%"))
+            ->orderBy('name')
+            ->limit(50)
+            ->get(['id', 'name', 'mercadopago_user_id']);
+
+        if ($this->vending_partner_id && !$partners->contains('id', $this->vending_partner_id)) {
+            $selected = VendingPartner::where('company_id', $companyId)->find($this->vending_partner_id, ['id', 'name', 'mercadopago_user_id']);
+            if ($selected) $partners->prepend($selected);
+        }
+
+        $products = Product::query()
+            ->where('company_id', $companyId)
+            ->where('type', 'finished_product')
+            ->when($productSearch !== '', function ($q) use ($productSearch) {
+                $q->where(function ($sq) use ($productSearch) {
+                    $sq->where('name', 'like', "%{$productSearch}%")
+                        ->orWhere('internal_code', 'like', "{$productSearch}%")
+                        ->orWhereHas('aliases', fn ($aq) => $aq->where('alias', 'like', "%{$productSearch}%"));
+                });
+            })
+            ->orderBy('name')
+            ->limit(50)
+            ->get(['id', 'name', 'internal_code']);
+
+        if ($this->product_id && !$products->contains('id', $this->product_id)) {
+            $selected = Product::where('company_id', $companyId)
+                ->where('type', 'finished_product')
+                ->find($this->product_id, ['id', 'name', 'internal_code']);
+            if ($selected) $products->prepend($selected);
+        }
 
         return view('livewire.vending.machine-form', compact('partners', 'products'));
     }
