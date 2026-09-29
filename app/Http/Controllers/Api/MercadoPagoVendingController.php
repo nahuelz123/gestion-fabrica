@@ -113,7 +113,16 @@ class MercadoPagoVendingController extends Controller
     {
         $signature = (string) $request->header('x-signature', '');
         $requestId = (string) $request->header('x-request-id', '');
-        $dataId = (string) $request->query->get('data.id', '');
+
+        // Algunos stacks PHP normalizan los puntos de los parámetros de query
+        // (data.id -> data_id). Aceptamos ambas variantes y, como último recurso,
+        // el data.id del body. El valor sigue usándose únicamente para validar HMAC.
+        $dataId = (string) (
+            $request->query->get('data.id')
+            ?? $request->query->get('data_id')
+            ?? data_get($request->json()->all(), 'data.id')
+            ?? ''
+        );
 
         if ($signature === '' || $requestId === '' || $dataId === '') {
             return false;
