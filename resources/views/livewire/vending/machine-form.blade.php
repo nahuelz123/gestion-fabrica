@@ -4,6 +4,10 @@
         <a href="{{ route('vending.index') }}" wire:navigate class="text-sm text-blue-700">← Volver</a>
     </div>
 
+    @if (session()->has('error'))
+        <div class="p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{{ session('error') }}</div>
+    @endif
+
     <form wire:submit="save" class="space-y-6">
         <div class="bg-white border rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
@@ -16,22 +20,33 @@
                 <input wire:model="name" placeholder="Ej: Máquina Kiosco Centro" class="mt-1 w-full border rounded-md px-3 py-2">
                 @error('name') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
             </div>
+
             <div>
                 <label class="text-sm font-medium">Comercio *</label>
-                <select wire:model="vending_partner_id" class="mt-1 w-full border rounded-md px-3 py-2">
+                <input wire:model.live.debounce.300ms="partnerSearch" placeholder="Buscar comercio..." class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+                <select wire:model="vending_partner_id" class="mt-2 w-full border rounded-md px-3 py-2">
                     <option value="">Seleccionar...</option>
-                    @foreach($partners as $partner)<option value="{{ $partner->id }}">{{ $partner->name }}</option>@endforeach
+                    @foreach($partners as $partner)
+                        <option value="{{ $partner->id }}">{{ $partner->name }}</option>
+                    @endforeach
                 </select>
+                <p class="text-xs text-gray-500 mt-1">Se muestran hasta 50 coincidencias para que siga siendo rápido con muchos comercios.</p>
                 @error('vending_partner_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
             </div>
+
             <div>
                 <label class="text-sm font-medium">Hamburguesa *</label>
-                <select wire:model="product_id" class="mt-1 w-full border rounded-md px-3 py-2">
+                <input wire:model.live.debounce.300ms="productSearch" placeholder="Buscar por nombre o código..." class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
+                <select wire:model="product_id" class="mt-2 w-full border rounded-md px-3 py-2">
                     <option value="">Seleccionar...</option>
-                    @foreach($products as $product)<option value="{{ $product->id }}">{{ $product->name }}</option>@endforeach
+                    @foreach($products as $product)
+                        <option value="{{ $product->id }}">{{ $product->name }}{{ $product->internal_code ? ' · '.$product->internal_code : '' }}</option>
+                    @endforeach
                 </select>
+                <p class="text-xs text-gray-500 mt-1">La búsqueda consulta el catálogo en servidor y no carga miles de productos en el navegador.</p>
                 @error('product_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
             </div>
+
             <div>
                 <label class="text-sm font-medium">Precio de venta *</label>
                 <input wire:model="sale_price" type="number" step="0.01" min="1" class="mt-1 w-full border rounded-md px-3 py-2">
