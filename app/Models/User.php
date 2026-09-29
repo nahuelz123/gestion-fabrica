@@ -15,37 +15,12 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
     protected $fillable = [
-        'company_id',
-        'name',
-        'email',
-        'phone',
-        'password',
-        'role',
-        'status',
-        'telegram_chat_id',
+        'company_id', 'name', 'email', 'phone', 'password', 'role', 'status', 'telegram_chat_id',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var list<string>
-     */
-    protected $hidden = [
-        'password',
-        'remember_token',
-    ];
+    protected $hidden = ['password', 'remember_token'];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -56,28 +31,22 @@ class User extends Authenticatable
         ];
     }
 
-    public function company(): BelongsTo
+    public function company(): BelongsTo { return $this->belongsTo(Company::class); }
+    public function isOwner(): bool { return $this->role === UserRole::Owner; }
+    public function isManager(): bool { return $this->role === UserRole::Manager; }
+    public function isActive(): bool { return $this->status === UserStatus::Active; }
+    public function canManageStock(): bool { return $this->isOwner() || $this->isManager(); }
+
+    public function canUseBotAction(?string $action): bool
     {
-        return $this->belongsTo(Company::class);
+        if ($this->isOwner()) return true;
+        if (!$this->isManager() || !$action) return false;
+
+        return in_array($action, [
+            'get_stock', 'get_low_stock', 'get_expiring_products', 'get_stock_movements',
+            'register_stock', 'adjust_stock', 'set_stock', 'add_stock', 'remove_stock',
+        ], true);
     }
 
-    public function isOwner(): bool
-    {
-        return $this->role === UserRole::Owner;
-    }
-
-    public function isManager(): bool
-    {
-        return $this->role === UserRole::Manager;
-    }
-
-    public function isActive(): bool
-    {
-        return $this->status === UserStatus::Active;
-    }
-
-    public function aiConversation()
-    {
-        return $this->hasOne(AiConversation::class);
-    }
+    public function aiConversation() { return $this->hasOne(AiConversation::class); }
 }

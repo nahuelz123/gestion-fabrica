@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Política de cookies · Gestión Fábrica</title>@vite(['resources/css/app.css'])</head>
+<body class="bg-gray-100 text-gray-800"><main class="max-w-4xl mx-auto px-5 py-10"><div class="bg-white border rounded-2xl p-6 md:p-10 shadow-sm space-y-6">
+<h1 class="text-3xl font-bold">Política de cookies</h1>
+<section class="space-y-2"><h2 class="text-xl font-semibold">Cookies utilizadas actualmente</h2><p>Gestión Fábrica utiliza únicamente cookies y mecanismos equivalentes necesarios para iniciar sesión, mantener una sesión autenticada y proteger formularios contra solicitudes falsificadas (CSRF).</p><p>No se utilizan actualmente cookies publicitarias, de remarketing ni de analítica de terceros. Por eso no se muestra un banner de consentimiento para cookies opcionales.</p></section>
+<section class="space-y-2"><h2 class="text-xl font-semibold">Cookies estrictamente necesarias</h2><p>La cookie de sesión permite reconocer al usuario autenticado. El token CSRF ayuda a verificar que las acciones provengan de una sesión legítima. Estas funciones son necesarias para la seguridad del servicio.</p></section>
+<section class="space-y-2"><h2 class="text-xl font-semibold">Cómo administrarlas</h2><p>El navegador permite borrar o bloquear cookies. Si se bloquean las cookies necesarias, el inicio de sesión y otras funciones pueden dejar de funcionar.</p></section>
+<section class="space-y-2"><h2 class="text-xl font-semibold">Cambios futuros</h2><p>Si se incorporan analítica, publicidad u otras cookies opcionales, esta política deberá actualizarse y, cuando corresponda, se incorporará consentimiento previo.</p></section>
+<div class="pt-4 border-t flex gap-4 text-sm"><a href="{{ route('legal.privacy') }}" class="text-blue-700 hover:underline">Política de privacidad</a><a href="{{ route('login') }}" class="text-blue-700 hover:underline">Volver al acceso</a></div>
+</div></main></body></html>
