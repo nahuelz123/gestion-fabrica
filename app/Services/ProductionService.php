@@ -22,7 +22,7 @@ class ProductionService
         if (!is_finite($targetQuantity) || $targetQuantity <= 0) throw new InvalidArgumentException('La cantidad a producir debe ser mayor a 0.');
         return DB::transaction(function () use ($productId,$warehouseId,$targetQuantity,$outputLotData,$userId) {
             $user = User::whereKey($userId)->firstOrFail();
-            if (!$user->isActive() || !$user->isOwner()) throw new InvalidArgumentException('No tenés permiso para registrar producción.');
+            if (!$user->isActive() || !$user->canManageProduction()) throw new InvalidArgumentException('No tenés permiso para registrar producción.');
             $companyId = $user->company_id;
             $product = Product::where('company_id',$companyId)->whereKey($productId)->lockForUpdate()->firstOrFail();
             $warehouse = Warehouse::where('company_id',$companyId)->whereKey($warehouseId)->firstOrFail();
