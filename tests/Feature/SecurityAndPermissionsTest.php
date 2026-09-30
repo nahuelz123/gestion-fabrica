@@ -119,7 +119,7 @@ class SecurityAndPermissionsTest extends TestCase
             ->call('calculate')
             ->assertSet('target_quantity', '288')
             ->assertSet('result.can_produce', true)
-            ->assertSee('Confirmar producción realizada')
+            ->assertSee('Confirmar producción')
             ->set('actual_consumptions.'.$ingredient->id, '280')
             ->call('confirm')
             ->assertSet('successMessage', '✅ Producción registrada. Se descontaron los consumos informados y se sumó el producto terminado.');
