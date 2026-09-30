@@ -36,6 +36,7 @@ class User extends Authenticatable
     public function isManager(): bool { return $this->role === UserRole::Manager; }
     public function isActive(): bool { return $this->status === UserStatus::Active; }
     public function canManageStock(): bool { return $this->isOwner() || $this->isManager(); }
+    public function canSimulateProduction(): bool { return $this->isOwner() || $this->isManager(); }
 
     public function canUseBotAction(?string $action): bool
     {
@@ -43,8 +44,14 @@ class User extends Authenticatable
         if (!$this->isManager() || !$action) return false;
 
         return in_array($action, [
+            // Gestión y consulta de stock.
             'get_stock', 'get_low_stock', 'get_expiring_products', 'get_stock_movements',
             'register_stock', 'adjust_stock', 'set_stock', 'add_stock', 'remove_stock',
+
+            // Excepción de sólo lectura para el gerente: puede comprobar pedidos
+            // de producción, pero nunca registrar producción ni modificar recetas.
+            'calculate_production', 'check_production', 'get_max_production',
+            'get_missing_inputs', 'plan_production',
         ], true);
     }
 
