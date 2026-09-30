@@ -146,9 +146,6 @@ class MercadoPagoVendingService
     public function provisionMachine(VendingMachine $machine, bool $forceOrder = false): VendingMachine
     {
         $machine->loadMissing('partner', 'product');
-        if ($machine->loaded_units <= 0) {
-            throw new RuntimeException('La máquina no tiene stock. Cargá unidades antes de preparar el cobro.');
-        }
 
         $partner = $this->provisionPartnerStore($machine->partner);
         $externalPosId = $machine->mercadopago_external_pos_id ?: $this->posExternalId($machine);
@@ -233,9 +230,6 @@ class MercadoPagoVendingService
         }
         if (!$machine->mercadopago_external_pos_id) {
             throw new RuntimeException('La máquina no tiene una caja de Mercado Pago configurada.');
-        }
-        if ($machine->loaded_units <= 0) {
-            throw new RuntimeException('La máquina no tiene stock para vender.');
         }
 
         $activeQuery = $machine->paymentOrders()
@@ -359,9 +353,9 @@ class MercadoPagoVendingService
                 default => 0.0,
             };
             $net = max(0, $gross - $refunded);
-            $commissionPercent = $existing ? (float) $existing->commission_percent : (float) $partner->commission_percent;
-            $commissionAmount = round($net * ($commissionPercent / 100), 2);
-            $factoryAmount = round($net - $commissionAmount, 2);
+            $commissionPercent = 0.0;
+            $commissionAmount = 0.0;
+            $factoryAmount = round($net, 2);
 
             if ($existing) {
                 $changed = $existing->status !== $saleStatus
@@ -370,7 +364,8 @@ class MercadoPagoVendingService
 
                 $existing->update([
                     'refunded_amount' => $refunded,
-                    'commission_amount' => $commissionAmount,
+                    'commission_percent' => 0,
+                    'commission_amount' => 0,
                     'factory_amount' => $factoryAmount,
                     'status' => $saleStatus,
                     'payload' => $order,
@@ -406,9 +401,6 @@ class MercadoPagoVendingService
                 'receipt_number' => 'VM-' . now()->format('Ymd') . '-' . str_pad((string) $sale->id, 7, '0', STR_PAD_LEFT),
             ]);
 
-            // Una venta reembolsada igual pudo haber entregado físicamente una hamburguesa,
-            // por eso no devolvemos stock automáticamente ante un reembolso.
-            if ($machine->loaded_units > 0) $machine->decrement('loaded_units');
             $machine->update(['last_sale_at' => now()]);
             $saleToNotify = $sale->fresh(['machine', 'partner', 'product']);
         });
