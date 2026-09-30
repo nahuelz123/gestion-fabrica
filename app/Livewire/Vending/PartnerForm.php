@@ -26,11 +26,14 @@ class PartnerForm extends Component
     public string $commission_percent = '0';
     public string $status = 'active';
     public bool $returnToMachine = false;
+    public bool $returnToMachines = false;
 
     public function mount(?int $id = null): void
     {
         Gate::authorize('owner-only');
-        $this->returnToMachine = request()->query('return') === 'machine';
+        $return = request()->query('return');
+        $this->returnToMachine = $return === 'machine';
+        $this->returnToMachines = $return === 'machines';
 
         if (!$id) return;
 
@@ -72,9 +75,6 @@ class PartnerForm extends Component
             'status' => 'required|in:active,inactive',
         ];
 
-        // Mercado Pago exige coordenadas reales para crear la sucursal. No se las
-        // pedimos al usuario como campos técnicos: el botón de vinculación toma la
-        // ubicación del dispositivo con permiso explícito del navegador.
         if ($connect) {
             $rules['latitude'] = 'required|numeric|between:-90,90';
             $rules['longitude'] = 'required|numeric|between:-180,180';
@@ -101,7 +101,7 @@ class PartnerForm extends Component
         $this->partnerId = $partner->id;
 
         if ($connect) {
-            $return = $this->returnToMachine ? 'machine' : 'partners';
+            $return = $this->returnToMachine ? 'machine' : ($this->returnToMachines ? 'machines' : 'partners');
             $this->redirect(route('vending.mercadopago.connect', ['partner' => $partner->id, 'return' => $return]), navigate: false);
             return;
         }
@@ -121,6 +121,11 @@ class PartnerForm extends Component
 
         if ($this->returnToMachine) {
             $this->redirect(route('vending.machines.create', ['partner' => $partner->id]), navigate: true);
+            return;
+        }
+
+        if ($this->returnToMachines) {
+            $this->redirect(route('vending.index'), navigate: true);
             return;
         }
 
