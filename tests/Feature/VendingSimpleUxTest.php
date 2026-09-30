@@ -38,7 +38,7 @@ class VendingSimpleUxTest extends TestCase
         ]);
     }
 
-    public function test_owner_can_create_commerce_without_typing_coordinates(): void
+    public function test_owner_can_create_kiosk_with_only_basic_address(): void
     {
         Livewire::actingAs($this->owner)
             ->test(PartnerForm::class)
@@ -47,7 +47,6 @@ class VendingSimpleUxTest extends TestCase
             ->set('street_number', '1234')
             ->set('city_name', 'Mar del Plata')
             ->set('state_name', 'Buenos Aires')
-            ->set('commission_percent', '15')
             ->call('save')
             ->assertHasNoErrors();
 
@@ -55,11 +54,12 @@ class VendingSimpleUxTest extends TestCase
 
         $this->assertSame('Kiosco Independencia', $partner->name);
         $this->assertSame('Independencia 1234, Mar del Plata, Buenos Aires', $partner->address);
+        $this->assertSame(0.0, (float) $partner->commission_percent);
         $this->assertNull($partner->latitude);
         $this->assertNull($partner->longitude);
     }
 
-    public function test_new_machine_only_needs_business_product_price_and_loaded_units(): void
+    public function test_new_machine_only_needs_kiosk_product_and_price(): void
     {
         $unit = Unit::create(['name' => 'Unidad', 'abbreviation' => 'u', 'type' => 'count']);
         $category = ProductCategory::create([
@@ -83,7 +83,7 @@ class VendingSimpleUxTest extends TestCase
             'city_name' => 'Mar del Plata',
             'state_name' => 'Buenos Aires',
             'address' => 'Belgrano 2000, Mar del Plata, Buenos Aires',
-            'commission_percent' => 15,
+            'commission_percent' => 0,
             'status' => 'active',
         ]);
 
@@ -92,7 +92,6 @@ class VendingSimpleUxTest extends TestCase
             ->set('vending_partner_id', $partner->id)
             ->set('product_id', $product->id)
             ->set('sale_price', '8500')
-            ->set('loaded_units', '40')
             ->call('save')
             ->assertHasNoErrors();
 
@@ -101,7 +100,7 @@ class VendingSimpleUxTest extends TestCase
         $this->assertMatchesRegularExpression('/^MAQ-\d{3}$/', $machine->code);
         $this->assertSame('Máquina Kiosco Centro', $machine->name);
         $this->assertSame(8500.0, (float) $machine->sale_price);
-        $this->assertSame(40, $machine->loaded_units);
+        $this->assertSame(0, $machine->loaded_units);
         $this->assertSame($partner->id, $machine->vending_partner_id);
         $this->assertSame($product->id, $machine->product_id);
     }
