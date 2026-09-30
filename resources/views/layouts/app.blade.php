@@ -21,9 +21,9 @@
             <a href="{{ route('inventory.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('inventory.index') || request()->routeIs('inventory.entry') || request()->routeIs('inventory.exit') || request()->routeIs('inventory.adjust') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">📋 <span class="ml-3">Inventario</span></a>
             <a href="{{ route('inventory.movements') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('inventory.movements') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧾 <span class="ml-3">Movimientos</span></a>
 
-            @can('simulate-production')
+            @can('manage-production')
                 <div class="pt-4 pb-2"><p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Producción</p></div>
-                <a href="{{ route('production.calculator') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('production.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧮 <span class="ml-3">Simulador</span></a>
+                <a href="{{ route('production.calculator') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('production.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧮 <span class="ml-3">Producción</span></a>
             @endcan
 
             @can('owner-only')
