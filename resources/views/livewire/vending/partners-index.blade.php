@@ -1,13 +1,13 @@
 <div class="space-y-5">
-    @if (session()->has('message'))<div class="p-3 bg-green-100 border border-green-300 text-green-800 rounded-md text-sm">{{ session('message') }}</div>@endif
-    @if (session()->has('error'))<div class="p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{{ session('error') }}</div>@endif
+    @if (session()->has('message'))<div class="p-4 bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-xl text-sm">{{ session('message') }}</div>@endif
+    @if (session()->has('error'))<div class="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm">{{ session('error') }}</div>@endif
 
-    <div class="flex items-center justify-between gap-4">
-        <div><h1 class="text-2xl font-bold text-gray-800">Comercios / kioscos</h1><p class="text-sm text-gray-500">Cada comercio cobra en su propia cuenta de Mercado Pago.</p></div>
-        <a href="{{ route('vending.partners.create') }}" wire:navigate class="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium">+ Nuevo comercio</a>
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div><h1 class="text-2xl font-bold text-gray-900">Comercios</h1><p class="text-sm text-gray-500">Cada kiosco cobra directamente en su propia cuenta de Mercado Pago.</p></div>
+        <a href="{{ route('vending.partners.create') }}" wire:navigate class="px-5 py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold text-center">+ Nuevo comercio</a>
     </div>
 
-    <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar comercio..." class="w-full sm:w-96 rounded-md border-gray-300 px-3 py-2 border text-sm">
+    <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar comercio..." class="w-full sm:w-96 rounded-lg border-gray-300 px-3 py-3 border text-sm">
 
     <div class="bg-white border rounded-xl overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
@@ -28,22 +28,22 @@
                         <td class="px-4 py-3 text-sm text-right">{{ $partner->machines_count }}</td>
                         <td class="px-4 py-3 text-sm">
                             @if($partner->hasMercadoPagoConnection())
-                                <span class="inline-flex px-2 py-1 rounded bg-green-100 text-green-800 text-xs font-semibold">Vinculado</span>
+                                <span class="inline-flex px-2 py-1 rounded bg-green-100 text-green-800 text-xs font-semibold">✅ Vinculado</span>
                             @else
-                                <span class="inline-flex px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs font-semibold">No vinculado</span>
+                                <span class="inline-flex px-2 py-1 rounded bg-yellow-100 text-yellow-800 text-xs font-semibold">Falta vincular</span>
                             @endif
                         </td>
                         <td class="px-4 py-3 text-right text-sm whitespace-nowrap">
                             @if(!$partner->hasMercadoPagoConnection())
-                                <a href="{{ route('vending.mercadopago.connect', $partner->id) }}" class="text-green-700 font-medium mr-3">Vincular MP</a>
+                                <a href="{{ route('vending.partners.edit', $partner->id) }}" wire:navigate class="text-red-700 font-semibold mr-3">Vincular MP</a>
                             @else
                                 <a href="{{ route('vending.mercadopago.connect', $partner->id) }}" class="text-gray-600 font-medium mr-3">Revincular</a>
                             @endif
-                            <a href="{{ route('vending.partners.edit', $partner->id) }}" wire:navigate class="text-blue-700 font-medium">Editar</a>
+                            <a href="{{ route('vending.partners.edit', $partner->id) }}" wire:navigate class="text-gray-700 font-medium">Editar</a>
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="6" class="px-4 py-10 text-center text-gray-400">Todavía no hay comercios cargados.</td></tr>
+                    <tr><td colspan="6" class="px-4 py-10 text-center text-gray-400">Todavía no hay comercios. Tocá “Nuevo comercio” para cargar el primero.</td></tr>
                 @endforelse
             </tbody>
         </table>
