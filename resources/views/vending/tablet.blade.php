@@ -14,13 +14,7 @@
         <h1 class="text-4xl md:text-6xl font-black">{{ $machine->product->name }}</h1>
         <div class="text-4xl md:text-5xl font-black text-yellow-300 mt-4">${{ number_format((float)$machine->sale_price, 0, ',', '.') }}</div>
 
-        @if($machine->loaded_units <= 0)
-            <div class="mt-10 bg-white text-red-700 border-4 border-yellow-400 rounded-3xl p-10 shadow-2xl">
-                <div class="text-5xl mb-4">🍔</div>
-                <div class="text-3xl font-black">Momentáneamente agotado</div>
-                <p class="text-gray-600 mt-3">No realices el pago. Estamos reponiendo la máquina.</p>
-            </div>
-        @elseif(!$machine->isReady())
+        @if(!$machine->isReady())
             <div class="mt-10 bg-white text-gray-900 border-4 border-yellow-400 rounded-3xl p-10 shadow-2xl">
                 <div class="text-2xl font-bold">Pago temporalmente no disponible</div>
                 <p class="text-gray-600 mt-3">El QR se está configurando. Esta pantalla se actualiza automáticamente.</p>
@@ -28,7 +22,7 @@
         @elseif(!$activeOrder)
             <div class="mt-10 bg-white text-gray-900 border-4 border-yellow-400 rounded-3xl p-10 shadow-2xl">
                 <div class="text-2xl font-bold">Preparando el próximo cobro…</div>
-                <p class="text-gray-600 mt-3">Esperá unos segundos. No escanees un QR guardado anteriormente.</p>
+                <p class="text-gray-600 mt-3">Esperá unos segundos. Esta pantalla se actualiza automáticamente.</p>
             </div>
         @else
             <div class="mt-8 bg-white rounded-3xl p-6 md:p-8 inline-block shadow-2xl ring-4 ring-yellow-400">
