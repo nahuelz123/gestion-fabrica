@@ -18,7 +18,7 @@ class AuthorizedBotActionExecutor extends BulkBotActionExecutor
             return [
                 'success' => false,
                 'message' => $user->isManager()
-                    ? 'Tu rol de encargado sólo permite consultar y gestionar stock.'
+                    ? 'Tu rol de encargado permite gestionar stock y producción operativa, pero no tareas administrativas como compras, productos o recetas.'
                     : 'No tenés permiso para realizar esa operación.',
             ];
         }
