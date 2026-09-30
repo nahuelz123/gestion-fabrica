@@ -28,8 +28,18 @@ class PartnersIndex extends Component
     public function render()
     {
         $companyId = auth()->user()->company_id;
+        $validStatuses = ['approved', 'partially_refunded'];
+
         $partners = VendingPartner::where('company_id', $companyId)
-            ->withCount('machines')
+            ->withCount([
+                'machines',
+                'sales as sales_today_count' => fn ($q) => $q
+                    ->whereIn('status', $validStatuses)
+                    ->whereDate('sold_at', now()->toDateString()),
+                'sales as sales_month_count' => fn ($q) => $q
+                    ->whereIn('status', $validStatuses)
+                    ->where('sold_at', '>=', now()->startOfMonth()),
+            ])
             ->when($this->search, fn ($q) => $q->where('name', 'like', '%' . $this->search . '%'))
             ->orderBy('name')
             ->paginate(25);
