@@ -12,7 +12,6 @@ use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\ProductionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use InvalidArgumentException;
 use Tests\TestCase;
 
 class ProductionServiceTest extends TestCase
@@ -39,14 +38,23 @@ class ProductionServiceTest extends TestCase
         $this->assertSame('completed',$order->status);
     }
 
-    public function test_manager_is_rejected_by_legacy_production_service_too(): void
+    public function test_manager_can_execute_operational_production_too(): void
     {
         $company=Company::create(['name'=>'Fábrica']);
         $manager=User::create(['company_id'=>$company->id,'name'=>'Encargado','email'=>'m@test.com','password'=>'pass','role'=>'manager','status'=>'active']);
         $warehouse=Warehouse::create(['company_id'=>$company->id,'name'=>'Principal']);
         $unit=Unit::create(['name'=>'Unidad','abbreviation'=>'u','type'=>'count']); $cat=ProductCategory::create(['company_id'=>$company->id,'name'=>'General']);
-        $product=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Hamb','internal_code'=>'H1','type'=>'finished_product','base_unit_id'=>$unit->id,'status'=>'active']);
-        $this->expectException(InvalidArgumentException::class);
-        app(ProductionService::class)->executeProduction($product->id,$warehouse->id,1,[],$manager->id);
+        $ingredient=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Pan','internal_code'=>'P1','type'=>'raw_material','base_unit_id'=>$unit->id,'status'=>'active']);
+        $finished=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Hamb','internal_code'=>'H1','type'=>'finished_product','base_unit_id'=>$unit->id,'status'=>'active']);
+        $recipe=Recipe::create(['company_id'=>$company->id,'product_id'=>$finished->id,'yield_quantity'=>10]);
+        $recipe->items()->create(['product_id'=>$ingredient->id,'quantity_base'=>10]);
+        Stock::create(['company_id'=>$company->id,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,'quantity'=>20]);
+
+        $order=app(ProductionService::class)->executeProduction($finished->id,$warehouse->id,10,[],$manager->id);
+
+        $this->assertSame($manager->id,(int)$order->user_id);
+        $this->assertSame(10.0,(float)Stock::where('product_id',$ingredient->id)->where('warehouse_id',$warehouse->id)->sum('quantity'));
+        $this->assertSame(10.0,(float)Stock::where('product_id',$finished->id)->where('warehouse_id',$warehouse->id)->sum('quantity'));
+        $this->assertSame('completed',$order->status);
     }
 }
