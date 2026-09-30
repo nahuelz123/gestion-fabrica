@@ -31,7 +31,14 @@ class MachineForm extends Component
     public function mount(?int $id = null): void
     {
         Gate::authorize('owner-only');
-        if (!$id) return;
+
+        if (!$id) {
+            $partnerId = request()->integer('partner');
+            if ($partnerId > 0 && VendingPartner::where('company_id', auth()->user()->company_id)->whereKey($partnerId)->exists()) {
+                $this->vending_partner_id = $partnerId;
+            }
+            return;
+        }
 
         $machine = VendingMachine::where('company_id', auth()->user()->company_id)
             ->with(['partner:id,name', 'product:id,name'])
@@ -54,24 +61,42 @@ class MachineForm extends Component
     {
         Gate::authorize('owner-only');
         $companyId = auth()->user()->company_id;
+
+        $this->validate([
+            'vending_partner_id' => ['required', 'integer', Rule::exists('vending_partners', 'id')->where('company_id', $companyId)],
+            'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('company_id', $companyId)->where('type', 'finished_product')],
+        ], [
+            'vending_partner_id.required' => 'Elegí el comercio donde está la máquina.',
+            'product_id.required' => 'Elegí la hamburguesa que vende la máquina.',
+        ]);
+
+        $partner = VendingPartner::where('company_id', $companyId)->findOrFail($this->vending_partner_id);
+        $product = Product::where('company_id', $companyId)->where('type', 'finished_product')->findOrFail($this->product_id);
+
+        if (trim($this->code) === '') {
+            $this->code = $this->generateCode($companyId);
+        }
+        if (trim($this->name) === '') {
+            $this->name = 'Máquina ' . $partner->name;
+        }
+
         $data = $this->validate([
             'code' => ['required', 'string', 'max:50', Rule::unique('vending_machines', 'code')->where('company_id', $companyId)->ignore($this->machineId)],
             'name' => 'required|string|max:255',
             'vending_partner_id' => ['required', 'integer', Rule::exists('vending_partners', 'id')->where('company_id', $companyId)],
-            'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('company_id', $companyId)],
+            'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('company_id', $companyId)->where('type', 'finished_product')],
             'location' => 'nullable|string|max:255',
             'sale_price' => 'required|numeric|min:1|max:99999999',
             'capacity' => 'nullable|integer|min:1|max:100000',
             'loaded_units' => 'required|integer|min:0|max:100000',
             'status' => 'required|in:active,inactive',
+        ], [
+            'sale_price.required' => 'Ingresá el precio de venta.',
+            'loaded_units.required' => 'Indicá cuántas hamburguesas cargaste en la máquina.',
         ]);
 
-        $partner = VendingPartner::where('company_id', $companyId)->findOrFail($this->vending_partner_id);
-        $product = Product::where('company_id', $companyId)->findOrFail($this->product_id);
-        abort_unless(($product->type instanceof \BackedEnum ? $product->type->value : $product->type) === 'finished_product', 422);
-
         if ($this->capacity !== '' && (int) $this->loaded_units > (int) $this->capacity) {
-            $this->addError('loaded_units', 'El stock dentro de la máquina no puede superar su capacidad.');
+            $this->addError('loaded_units', 'Las hamburguesas cargadas no pueden superar la capacidad de la máquina.');
             return;
         }
 
@@ -102,21 +127,38 @@ class MachineForm extends Component
         $data['loaded_units'] = (int) $this->loaded_units;
         $machine->fill($data)->save();
 
-        if ($machine->status === 'active' && $machine->loaded_units > 0 && $partner->hasMercadoPagoConnection()) {
+        if (!$partner->hasMercadoPagoConnection()) {
+            session()->flash('message', 'Máquina guardada. Falta un solo paso: vincular Mercado Pago del comercio.');
+            $this->redirect(route('vending.partners.edit', ['id' => $partner->id, 'return' => 'machines']), navigate: true);
+            return;
+        }
+
+        if ($machine->status === 'active' && $machine->loaded_units > 0) {
             try {
                 $service->provisionMachine($machine->fresh(['partner', 'product']), false);
-                session()->flash('message', 'Máquina guardada y QR de Mercado Pago sincronizado.');
+                session()->flash('message', 'Máquina lista. El QR de Mercado Pago quedó sincronizado.');
             } catch (Throwable $e) {
                 report($e);
                 session()->flash('error', 'La máquina se guardó, pero todavía no quedó lista para cobrar: ' . $e->getMessage());
             }
         } elseif ($machine->loaded_units <= 0) {
-            session()->flash('message', 'Máquina guardada sin stock. La tablet no mostrará el QR hasta que cargues unidades.');
+            session()->flash('message', 'Máquina guardada sin stock. El QR se mostrará cuando cargues unidades.');
         } else {
-            session()->flash('message', 'Máquina guardada. Vinculá Mercado Pago al comercio para activar el QR.');
+            session()->flash('message', 'Máquina guardada.');
         }
 
         $this->redirect(route('vending.index'), navigate: true);
+    }
+
+    private function generateCode(int $companyId): string
+    {
+        $next = ((int) VendingMachine::where('company_id', $companyId)->max('id')) + 1;
+        do {
+            $code = 'MAQ-' . str_pad((string) $next, 3, '0', STR_PAD_LEFT);
+            $next++;
+        } while (VendingMachine::where('company_id', $companyId)->where('code', $code)->exists());
+
+        return $code;
     }
 
     public function render()
@@ -125,6 +167,8 @@ class MachineForm extends Component
         $companyId = auth()->user()->company_id;
         $partnerSearch = trim($this->partnerSearch);
         $productSearch = trim($this->productSearch);
+        $partnerCount = VendingPartner::where('company_id', $companyId)->where('status', 'active')->count();
+        $productCount = Product::where('company_id', $companyId)->where('type', 'finished_product')->where('status', 'active')->count();
 
         $partners = VendingPartner::query()
             ->where('company_id', $companyId)
@@ -144,6 +188,7 @@ class MachineForm extends Component
 
         $products = Product::query()
             ->where('company_id', $companyId)
+            ->where('status', 'active')
             ->where('type', 'finished_product')
             ->when($productSearch !== '', function ($q) use ($productSearch) {
                 $q->where(function ($sq) use ($productSearch) {
@@ -163,6 +208,10 @@ class MachineForm extends Component
             if ($selected) $products->prepend($selected);
         }
 
-        return view('livewire.vending.machine-form', compact('partners', 'products'));
+        $selectedPartner = $this->vending_partner_id
+            ? VendingPartner::where('company_id', $companyId)->find($this->vending_partner_id)
+            : null;
+
+        return view('livewire.vending.machine-form', compact('partners', 'products', 'selectedPartner', 'partnerCount', 'productCount'));
     }
 }
