@@ -35,11 +35,6 @@ class Index extends Component
             ->with(['partner', 'product'])
             ->findOrFail($machineId);
 
-        if ($machine->loaded_units <= 0) {
-            session()->flash('error', 'Cargá stock en la máquina antes de preparar un cobro.');
-            return;
-        }
-
         try {
             $service->provisionMachine($machine, true);
             session()->flash('message', "{$machine->name} quedó sincronizada con Mercado Pago.");
@@ -52,12 +47,28 @@ class Index extends Component
     public function render()
     {
         $companyId = auth()->user()->company_id;
-        $todaySales = VendingSale::where('company_id', $companyId)
-            ->whereIn('status', ['approved', 'partially_refunded'])
-            ->whereDate('sold_at', now()->toDateString());
+        $validStatuses = ['approved', 'partially_refunded'];
+
+        $sales = VendingSale::where('company_id', $companyId)
+            ->whereIn('status', $validStatuses);
+
+        $stats = [
+            'today' => (clone $sales)->whereDate('sold_at', now()->toDateString())->count(),
+            'week' => (clone $sales)->where('sold_at', '>=', now()->startOfWeek())->count(),
+            'month' => (clone $sales)->where('sold_at', '>=', now()->startOfMonth())->count(),
+            'machines' => VendingMachine::where('company_id', $companyId)->where('status', 'active')->count(),
+        ];
 
         $machines = VendingMachine::where('company_id', $companyId)
             ->with(['partner', 'product'])
+            ->withCount([
+                'sales as sales_today_count' => fn ($q) => $q
+                    ->whereIn('status', $validStatuses)
+                    ->whereDate('sold_at', now()->toDateString()),
+                'sales as sales_month_count' => fn ($q) => $q
+                    ->whereIn('status', $validStatuses)
+                    ->where('sold_at', '>=', now()->startOfMonth()),
+            ])
             ->when($this->search, fn ($q) => $q->where(function ($sq) {
                 $term = '%' . $this->search . '%';
                 $sq->where('name', 'like', $term)
@@ -67,19 +78,6 @@ class Index extends Component
             }))
             ->orderBy('name')
             ->paginate(25);
-
-        $gross = (float) (clone $todaySales)->sum('gross_amount');
-        $refunded = (float) (clone $todaySales)->sum('refunded_amount');
-
-        $stats = [
-            'sales_count' => (clone $todaySales)->count(),
-            'gross' => max(0, $gross - $refunded),
-            'factory' => (float) (clone $todaySales)->sum('factory_amount'),
-            'commission' => (float) (clone $todaySales)->sum('commission_amount'),
-            'pending_settlement' => (float) VendingSale::where('company_id', $companyId)
-                ->whereIn('status', ['approved', 'partially_refunded'])
-                ->whereNull('settled_at')->sum('factory_amount'),
-        ];
 
         return view('livewire.vending.index', compact('machines', 'stats'));
     }
