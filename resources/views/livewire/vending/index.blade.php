@@ -1,20 +1,21 @@
 <div class="space-y-6">
     @if (session()->has('message'))
-        <div class="p-3 bg-green-100 border border-green-300 text-green-800 rounded-md text-sm">{{ session('message') }}</div>
+        <div class="p-4 bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-xl text-sm">{{ session('message') }}</div>
     @endif
     @if (session()->has('error'))
-        <div class="p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{{ session('error') }}</div>
+        <div class="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm">{{ session('error') }}</div>
     @endif
 
     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-            <h1 class="text-2xl font-bold text-gray-800">Máquinas expendedoras</h1>
-            <p class="text-sm text-gray-500 mt-1">Ventas verificadas con Mercado Pago, stock teórico y comisión por comercio.</p>
+            <h1 class="text-2xl font-bold text-gray-900">Máquinas expendedoras</h1>
+            <p class="text-sm text-gray-500 mt-1">Comercios, QR, ventas y comisiones en un solo lugar.</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <a href="{{ route('vending.sales') }}" wire:navigate class="px-4 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium">Ver ventas</a>
-            <a href="{{ route('vending.partners.index') }}" wire:navigate class="px-4 py-2 rounded-md border border-gray-300 bg-white text-sm font-medium">Comercios</a>
-            <a href="{{ route('vending.machines.create') }}" wire:navigate class="px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium">+ Nueva máquina</a>
+            <a href="{{ route('vending.sales') }}" wire:navigate class="px-4 py-2.5 rounded-lg border border-gray-300 bg-white text-sm font-medium">Ver ventas</a>
+            <a href="{{ route('vending.partners.index') }}" wire:navigate class="px-4 py-2.5 rounded-lg border border-gray-300 bg-white text-sm font-medium">Comercios</a>
+            <a href="{{ route('vending.partners.create', ['return' => 'machine']) }}" wire:navigate class="px-4 py-2.5 rounded-lg bg-yellow-400 text-gray-900 text-sm font-semibold">+ Nuevo comercio</a>
+            <a href="{{ route('vending.machines.create') }}" wire:navigate class="px-4 py-2.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold">+ Nueva máquina</a>
         </div>
     </div>
 
@@ -26,7 +27,7 @@
         <div class="bg-white border rounded-xl p-4"><div class="text-xs text-gray-500">Pendiente de liquidar</div><div class="text-xl font-bold mt-1">${{ number_format($stats['pending_settlement'], 2, ',', '.') }}</div></div>
     </div>
 
-    <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar máquina, comercio o producto..." class="w-full sm:w-96 rounded-md border-gray-300 px-3 py-2 border text-sm">
+    <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar máquina, comercio o producto..." class="w-full sm:w-96 rounded-lg border-gray-300 px-3 py-3 border text-sm">
 
     <div class="bg-white border rounded-xl overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
@@ -63,13 +64,13 @@
                                 <a href="{{ $machine->tabletUrl() }}" target="_blank" class="text-green-700 font-medium mr-3">Tablet</a>
                             @endif
                             @if($machine->partner->hasMercadoPagoConnection() && $machine->loaded_units > 0)
-                                <button wire:click="provision({{ $machine->id }})" wire:loading.attr="disabled" class="text-purple-700 font-medium mr-3">Sincronizar</button>
+                                <button wire:click="provision({{ $machine->id }})" wire:loading.attr="disabled" class="text-amber-700 font-medium mr-3">Sincronizar</button>
                             @endif
-                            <a href="{{ route('vending.machines.edit', $machine->id) }}" wire:navigate class="text-blue-700 font-medium">Editar</a>
+                            <a href="{{ route('vending.machines.edit', $machine->id) }}" wire:navigate class="text-red-700 font-medium">Editar</a>
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="7" class="px-4 py-10 text-center text-gray-400">Todavía no hay máquinas cargadas.</td></tr>
+                    <tr><td colspan="7" class="px-4 py-10 text-center text-gray-400">Todavía no hay máquinas. Creá primero el comercio y después la máquina.</td></tr>
                 @endforelse
             </tbody>
         </table>
