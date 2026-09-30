@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\Recipe;
 use App\Models\Stock;
 use App\Models\Unit;
 use App\Models\User;
@@ -42,13 +43,48 @@ class BotActionExecutorTest extends TestCase
         $this->assertSame(0.0,(float)Stock::where('product_id',$d['pb']->id)->sum('quantity'));
     }
 
-    public function test_manager_cannot_use_non_stock_actions(): void
+    public function test_manager_cannot_use_administrative_actions(): void
     {
         $d=$this->data(); $executor=app(BotActionExecutor::class);
         $result=$executor->execute($d['manager'],'112',['name'=>'create_product','arguments'=>['name'=>'Harina','presentation_name'=>'bolsa']],[]);
         $this->assertFalse($result['success']);
-        $this->assertStringContainsString('sólo permite', $result['message']);
+        $this->assertStringContainsString('permite gestionar stock y producción operativa', $result['message']);
         $this->assertDatabaseMissing('products',['company_id'=>$d['a']->id,'name'=>'Harina']);
+    }
+
+    public function test_manager_can_register_one_cart_and_actual_consumption_from_bot(): void
+    {
+        $d=$this->data();
+        $finished=Product::create([
+            'company_id'=>$d['a']->id,
+            'category_id'=>$d['ca']->id,
+            'name'=>'Hamburguesa cheddar',
+            'internal_code'=>'HC',
+            'type'=>'finished_product',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+        $recipe=Recipe::create(['company_id'=>$d['a']->id,'product_id'=>$finished->id,'yield_quantity'=>24]);
+        $recipe->items()->create(['product_id'=>$d['pa']->id,'quantity_base'=>24]);
+        Stock::create(['company_id'=>$d['a']->id,'product_id'=>$d['pa']->id,'warehouse_id'=>$d['wa']->id,'quantity'=>400]);
+
+        $executor=app(BotActionExecutor::class);
+        $result=$executor->execute($d['manager'],'112',[
+            'name'=>'register_production',
+            'arguments'=>[
+                'product_name'=>'Hamburguesa cheddar',
+                'carros'=>1,
+                'actual_consumptions'=>[
+                    ['product_name'=>'Papel','quantity'=>280],
+                ],
+            ],
+        ],[]);
+
+        $this->assertTrue($result['success'], $result['message'] ?? 'La producción por bot falló.');
+        $this->assertStringContainsString('288 u', $result['message']);
+        $this->assertSame(120.0,(float)Stock::where('company_id',$d['a']->id)->where('product_id',$d['pa']->id)->sum('quantity'));
+        $this->assertSame(288.0,(float)Stock::where('company_id',$d['a']->id)->where('product_id',$finished->id)->sum('quantity'));
+        $this->assertDatabaseHas('production_orders',['company_id'=>$d['a']->id,'product_id'=>$finished->id,'user_id'=>$d['manager']->id,'target_quantity'=>288]);
     }
 
     public function test_owner_can_create_and_update_product_with_current_schema(): void
