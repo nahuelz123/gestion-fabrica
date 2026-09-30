@@ -26,9 +26,7 @@ class RefreshVendingMachineOrderJob implements ShouldQueue
     {
         $machine = VendingMachine::with(['partner', 'product'])->find($this->machineId);
 
-        // Si no hay mercadería no preparamos un nuevo cobro: evita que alguien pague
-        // cuando la máquina ya quedó vacía.
-        if (!$machine || $machine->status !== 'active' || $machine->loaded_units <= 0) {
+        if (!$machine || $machine->status !== 'active') {
             return;
         }
 
