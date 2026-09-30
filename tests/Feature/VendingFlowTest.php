@@ -61,7 +61,7 @@ class VendingFlowTest extends TestCase
             'state_name' => 'Buenos Aires',
             'latitude' => -38.0055,
             'longitude' => -57.5426,
-            'commission_percent' => 20,
+            'commission_percent' => 0,
             'mercadopago_user_id' => '999001',
             'mercadopago_access_token' => 'APP_USR-test-token',
             'mercadopago_refresh_token' => 'refresh-test',
@@ -76,13 +76,12 @@ class VendingFlowTest extends TestCase
             'code' => 'MAQ-TEST-1',
             'name' => 'Máquina Centro',
             'sale_price' => 10000,
-            'capacity' => 20,
-            'loaded_units' => 5,
+            'loaded_units' => 0,
             'status' => 'active',
         ]);
     }
 
-    public function test_provision_creates_store_pos_qr_and_payment_order(): void
+    public function test_provision_creates_store_pos_qr_and_payment_order_without_stock_requirement(): void
     {
         Http::fake(function (Request $request) {
             $url = $request->url();
@@ -132,7 +131,7 @@ class VendingFlowTest extends TestCase
         ]);
     }
 
-    public function test_processed_order_creates_one_sale_and_decrements_machine_once(): void
+    public function test_processed_order_creates_one_sale_without_touching_stock(): void
     {
         Queue::fake([RefreshVendingMachineOrderJob::class, NotifyVendingSaleJob::class]);
 
@@ -168,17 +167,17 @@ class VendingFlowTest extends TestCase
         $this->assertNotNull($first);
         $this->assertNotNull($second);
         $this->assertDatabaseCount('vending_sales', 1);
-        $this->assertSame(4, $this->machine->fresh()->loaded_units);
+        $this->assertSame(0, $this->machine->fresh()->loaded_units);
 
         $sale = VendingSale::firstOrFail();
         $this->assertSame('approved', $sale->status);
         $this->assertSame(10000.0, (float) $sale->gross_amount);
-        $this->assertSame(2000.0, (float) $sale->commission_amount);
-        $this->assertSame(8000.0, (float) $sale->factory_amount);
+        $this->assertSame(0.0, (float) $sale->commission_amount);
+        $this->assertSame(10000.0, (float) $sale->factory_amount);
         $this->assertNotEmpty($sale->receipt_number);
     }
 
-    public function test_refund_reconciles_amounts_without_restoring_physical_stock(): void
+    public function test_refund_updates_sale_without_touching_machine_stock(): void
     {
         Queue::fake([RefreshVendingMachineOrderJob::class, NotifyVendingSaleJob::class]);
 
@@ -204,14 +203,13 @@ class VendingFlowTest extends TestCase
             'external_reference' => 'VM1_REFUND',
             'gross_amount' => 10000,
             'refunded_amount' => 0,
-            'commission_percent' => 20,
-            'commission_amount' => 2000,
-            'factory_amount' => 8000,
+            'commission_percent' => 0,
+            'commission_amount' => 0,
+            'factory_amount' => 10000,
             'status' => 'approved',
             'sold_at' => now(),
         ]);
 
-        // El producto ya fue entregado físicamente; el stock está en 4 antes del reembolso.
         $this->machine->update(['loaded_units' => 4]);
 
         Http::fake([
