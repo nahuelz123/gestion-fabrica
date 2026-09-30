@@ -13,10 +13,10 @@ use Livewire\Component;
 #[Layout('layouts.guest')]
 class Login extends Component
 {
-    #[Rule('required|string')]
+    #[Rule('required|string|max:255')]
     public string $login = '';
 
-    #[Rule('required|string')]
+    #[Rule('required|string|max:255')]
     public string $password = '';
 
     public bool $remember = false;
@@ -24,9 +24,8 @@ class Login extends Component
     public function authenticate(): void
     {
         $this->validate();
-
-        // Rate limit: max 5 attempts per login+IP per minute
-        $key = 'login.' . Str::lower($this->login) . '|' . request()->ip();
+        $login = trim($this->login);
+        $key = 'login.' . Str::lower($login) . '|' . request()->ip();
 
         if (RateLimiter::tooManyAttempts($key, 5)) {
             $seconds = RateLimiter::availableIn($key);
@@ -34,32 +33,27 @@ class Login extends Component
             return;
         }
 
-        // Determine if login is email or phone
-        $field = filter_var($this->login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
-
-        $credentials = [
-            $field => $this->login,
-            'password' => $this->password,
-        ];
+        $field = filter_var($login, FILTER_VALIDATE_EMAIL) ? 'email' : 'phone';
+        $credentials = [$field => $login, 'password' => $this->password];
 
         if (!Auth::attempt($credentials, $this->remember)) {
-            RateLimiter::hit($key, 60); // decay of 60 seconds
+            RateLimiter::hit($key, 60);
             $this->addError('login', 'Las credenciales no coinciden con nuestros registros.');
             return;
         }
 
         $user = Auth::user();
-
         if ($user->status !== UserStatus::Active) {
             Auth::logout();
+            session()->invalidate();
+            session()->regenerateToken();
+            RateLimiter::hit($key, 60);
             $this->addError('login', 'Tu cuenta está inactiva. Contactá al administrador.');
             return;
         }
 
-        RateLimiter::clear($key); // reset counter on successful login
-
+        RateLimiter::clear($key);
         session()->regenerate();
-
         $this->redirect(route('dashboard'), navigate: true);
     }
 
