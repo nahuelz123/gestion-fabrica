@@ -1,85 +1,120 @@
-<div class="max-w-4xl space-y-6">
+<div class="max-w-3xl space-y-6">
     <div>
-        <h1 class="text-2xl font-bold text-gray-800">{{ $machineId ? 'Editar máquina' : 'Nueva máquina' }}</h1>
-        <a href="{{ route('vending.index') }}" wire:navigate class="text-sm text-blue-700">← Volver</a>
+        <h1 class="text-2xl font-bold text-gray-900">{{ $machineId ? 'Editar máquina' : 'Nueva máquina' }}</h1>
+        <p class="text-sm text-gray-500 mt-1">Elegí comercio, hamburguesa, precio y stock. El resto lo hace el sistema.</p>
+        <a href="{{ route('vending.index') }}" wire:navigate class="inline-block mt-2 text-sm text-red-700">← Volver</a>
     </div>
 
+    @if (session()->has('message'))
+        <div class="p-4 bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-xl text-sm">{{ session('message') }}</div>
+    @endif
     @if (session()->has('error'))
-        <div class="p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{{ session('error') }}</div>
+        <div class="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl text-sm">{{ session('error') }}</div>
     @endif
 
-    <form wire:submit="save" class="space-y-6">
-        <div class="bg-white border rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+    <form wire:submit="save" class="space-y-5">
+        <div class="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 space-y-5">
             <div>
-                <label class="text-sm font-medium">Código *</label>
-                <input wire:model="code" placeholder="Ej: MAQ-001" class="mt-1 w-full border rounded-md px-3 py-2">
-                @error('code') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
-            </div>
-            <div>
-                <label class="text-sm font-medium">Nombre *</label>
-                <input wire:model="name" placeholder="Ej: Máquina Kiosco Centro" class="mt-1 w-full border rounded-md px-3 py-2">
-                @error('name') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
-            </div>
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    <label class="text-sm font-semibold text-gray-800">Comercio *</label>
+                    <a href="{{ route('vending.partners.create', ['return' => 'machine']) }}" wire:navigate class="text-sm font-semibold text-red-700">+ Crear comercio</a>
+                </div>
 
-            <div>
-                <label class="text-sm font-medium">Comercio *</label>
-                <input wire:model.live.debounce.300ms="partnerSearch" placeholder="Buscar comercio..." class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
-                <select wire:model="vending_partner_id" class="mt-2 w-full border rounded-md px-3 py-2">
-                    <option value="">Seleccionar...</option>
+                @if($partnerCount > 20)
+                    <input wire:model.live.debounce.300ms="partnerSearch" placeholder="Buscar comercio..." class="mb-2 w-full border rounded-lg px-3 py-2.5 text-sm">
+                @endif
+
+                <select wire:model.live="vending_partner_id" class="w-full border rounded-lg px-3 py-3 text-base">
+                    <option value="">Elegir comercio...</option>
                     @foreach($partners as $partner)
                         <option value="{{ $partner->id }}">{{ $partner->name }}</option>
                     @endforeach
                 </select>
-                <p class="text-xs text-gray-500 mt-1">Se muestran hasta 50 coincidencias para que siga siendo rápido con muchos comercios.</p>
                 @error('vending_partner_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+
+                @if($selectedPartner)
+                    <div class="mt-2 text-xs {{ $selectedPartner->hasMercadoPagoConnection() ? 'text-green-700' : 'text-amber-700' }}">
+                        {{ $selectedPartner->hasMercadoPagoConnection() ? '✅ Mercado Pago vinculado' : '⚠️ Falta vincular Mercado Pago. Al guardar te llevo al paso de vinculación.' }}
+                    </div>
+                @endif
             </div>
 
             <div>
-                <label class="text-sm font-medium">Hamburguesa *</label>
-                <input wire:model.live.debounce.300ms="productSearch" placeholder="Buscar por nombre o código..." class="mt-1 w-full border rounded-md px-3 py-2 text-sm">
-                <select wire:model="product_id" class="mt-2 w-full border rounded-md px-3 py-2">
-                    <option value="">Seleccionar...</option>
+                <label class="text-sm font-semibold text-gray-800">Hamburguesa *</label>
+                @if($productCount > 20)
+                    <input wire:model.live.debounce.300ms="productSearch" placeholder="Buscar hamburguesa..." class="mt-1 mb-2 w-full border rounded-lg px-3 py-2.5 text-sm">
+                @endif
+                <select wire:model="product_id" class="mt-1 w-full border rounded-lg px-3 py-3 text-base">
+                    <option value="">Elegir hamburguesa...</option>
                     @foreach($products as $product)
-                        <option value="{{ $product->id }}">{{ $product->name }}{{ $product->internal_code ? ' · '.$product->internal_code : '' }}</option>
+                        <option value="{{ $product->id }}">{{ $product->name }}</option>
                     @endforeach
                 </select>
-                <p class="text-xs text-gray-500 mt-1">La búsqueda consulta el catálogo en servidor y no carga miles de productos en el navegador.</p>
                 @error('product_id') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
             </div>
 
-            <div>
-                <label class="text-sm font-medium">Precio de venta *</label>
-                <input wire:model="sale_price" type="number" step="0.01" min="1" class="mt-1 w-full border rounded-md px-3 py-2">
-                @error('sale_price') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label class="text-sm font-semibold text-gray-800">Precio de venta *</label>
+                    <div class="relative mt-1">
+                        <span class="absolute left-3 top-3 text-gray-500">$</span>
+                        <input wire:model="sale_price" type="number" step="0.01" min="1" placeholder="8500" class="w-full border rounded-lg pl-7 pr-3 py-3 text-base">
+                    </div>
+                    @error('sale_price') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
+                    <label class="text-sm font-semibold text-gray-800">Hamburguesas cargadas *</label>
+                    <input wire:model="loaded_units" type="number" min="0" placeholder="40" class="mt-1 w-full border rounded-lg px-3 py-3 text-base">
+                    <p class="text-xs text-gray-500 mt-1">Cada venta aprobada descuenta 1 automáticamente.</p>
+                    @error('loaded_units') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                </div>
             </div>
-            <div>
-                <label class="text-sm font-medium">Ubicación dentro del comercio</label>
-                <input wire:model="location" placeholder="Ej: entrada, frente a caja" class="mt-1 w-full border rounded-md px-3 py-2">
-            </div>
-            <div>
-                <label class="text-sm font-medium">Capacidad</label>
-                <input wire:model="capacity" type="number" min="1" class="mt-1 w-full border rounded-md px-3 py-2">
-                @error('capacity') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
-            </div>
-            <div>
-                <label class="text-sm font-medium">Hamburguesas cargadas ahora *</label>
-                <input wire:model="loaded_units" type="number" min="0" class="mt-1 w-full border rounded-md px-3 py-2">
-                <p class="text-xs text-gray-500 mt-1">Cada venta aprobada descuenta 1 automáticamente.</p>
-                @error('loaded_units') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
-            </div>
-            <div>
-                <label class="text-sm font-medium">Estado</label>
-                <select wire:model="status" class="mt-1 w-full border rounded-md px-3 py-2"><option value="active">Activa</option><option value="inactive">Inactiva</option></select>
-            </div>
+
+            <details class="border-t pt-4">
+                <summary class="cursor-pointer text-sm font-medium text-gray-600">Opciones avanzadas</summary>
+                <p class="text-xs text-gray-500 mt-2">Normalmente no necesitás tocar nada acá.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                    <div>
+                        <label class="text-sm text-gray-600">Capacidad máxima</label>
+                        <input wire:model="capacity" type="number" min="1" class="mt-1 w-full border rounded-lg px-3 py-2.5">
+                        @error('capacity') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-600">Ubicación dentro del comercio</label>
+                        <input wire:model="location" placeholder="Ej: al lado de la caja" class="mt-1 w-full border rounded-lg px-3 py-2.5">
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-600">Código</label>
+                        <input wire:model="code" placeholder="Se genera solo" class="mt-1 w-full border rounded-lg px-3 py-2.5">
+                        <p class="text-xs text-gray-400 mt-1">Si lo dejás vacío se genera automáticamente.</p>
+                        @error('code') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-600">Nombre interno</label>
+                        <input wire:model="name" placeholder="Se genera solo" class="mt-1 w-full border rounded-lg px-3 py-2.5">
+                        <p class="text-xs text-gray-400 mt-1">Ej: Máquina Kiosco Independencia.</p>
+                        @error('name') <p class="text-sm text-red-600 mt-1">{{ $message }}</p> @enderror
+                    </div>
+                    @if($machineId)
+                        <div>
+                            <label class="text-sm text-gray-600">Estado</label>
+                            <select wire:model="status" class="mt-1 w-full border rounded-lg px-3 py-2.5"><option value="active">Activa</option><option value="inactive">Inactiva</option></select>
+                        </div>
+                    @endif
+                </div>
+            </details>
         </div>
 
-        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 text-sm text-blue-900">
-            Al guardar una máquina activa, si el comercio ya tiene Mercado Pago vinculado, el sistema crea o recupera automáticamente la sucursal, la caja/POS, el QR estático y deja preparada la orden con el precio configurado.
+        <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 text-sm text-gray-700">
+            <strong>Así de simple:</strong> si el comercio ya tiene Mercado Pago vinculado, al guardar se prepara automáticamente la sucursal, la caja, el QR y el cobro con el precio configurado.
         </div>
 
-        <div class="flex justify-end gap-3">
-            <a href="{{ route('vending.index') }}" wire:navigate class="px-5 py-2.5 border rounded-md">Cancelar</a>
-            <button type="submit" class="px-5 py-2.5 bg-blue-600 text-white rounded-md font-medium" wire:loading.attr="disabled">Guardar y sincronizar</button>
+        <div class="flex flex-col-reverse sm:flex-row sm:justify-end gap-3">
+            <a href="{{ route('vending.index') }}" wire:navigate class="px-5 py-3 border rounded-lg text-center">Cancelar</a>
+            <button type="submit" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold" wire:loading.attr="disabled">
+                {{ $machineId ? 'Guardar cambios' : 'Guardar máquina' }}
+            </button>
         </div>
     </form>
 </div>
