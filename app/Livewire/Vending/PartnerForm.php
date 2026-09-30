@@ -18,17 +18,20 @@ class PartnerForm extends Component
     public string $phone = '';
     public string $street_name = '';
     public string $street_number = '';
-    public string $city_name = '';
+    public string $city_name = 'Mar del Plata';
     public string $state_name = 'Buenos Aires';
     public string $location_reference = '';
     public string $latitude = '';
     public string $longitude = '';
     public string $commission_percent = '0';
     public string $status = 'active';
+    public bool $returnToMachine = false;
 
     public function mount(?int $id = null): void
     {
         Gate::authorize('owner-only');
+        $this->returnToMachine = request()->query('return') === 'machine';
+
         if (!$id) return;
 
         $partner = VendingPartner::where('company_id', auth()->user()->company_id)->findOrFail($id);
@@ -44,7 +47,19 @@ class PartnerForm extends Component
 
     public function save(MercadoPagoVendingService $service): void
     {
-        $data = $this->validate([
+        $this->persist($service, false);
+    }
+
+    public function saveAndConnect(MercadoPagoVendingService $service): void
+    {
+        $this->persist($service, true);
+    }
+
+    private function persist(MercadoPagoVendingService $service, bool $connect): void
+    {
+        Gate::authorize('owner-only');
+
+        $rules = [
             'name' => 'required|string|max:255',
             'contact_name' => 'nullable|string|max:255',
             'phone' => 'nullable|string|max:100',
@@ -53,21 +68,43 @@ class PartnerForm extends Component
             'city_name' => 'required|string|max:255',
             'state_name' => 'required|string|max:255',
             'location_reference' => 'nullable|string|max:255',
-            'latitude' => 'required|numeric|between:-90,90',
-            'longitude' => 'required|numeric|between:-180,180',
             'commission_percent' => 'required|numeric|min:0|max:100',
             'status' => 'required|in:active,inactive',
+        ];
+
+        // Mercado Pago exige coordenadas reales para crear la sucursal. No se las
+        // pedimos al usuario como campos técnicos: el botón de vinculación toma la
+        // ubicación del dispositivo con permiso explícito del navegador.
+        if ($connect) {
+            $rules['latitude'] = 'required|numeric|between:-90,90';
+            $rules['longitude'] = 'required|numeric|between:-180,180';
+        } else {
+            $rules['latitude'] = 'nullable|numeric|between:-90,90';
+            $rules['longitude'] = 'nullable|numeric|between:-180,180';
+        }
+
+        $data = $this->validate($rules, [
+            'latitude.required' => 'Necesitamos la ubicación del comercio para vincular Mercado Pago.',
+            'longitude.required' => 'Necesitamos la ubicación del comercio para vincular Mercado Pago.',
         ]);
 
         $data['company_id'] = auth()->user()->company_id;
         $data['address'] = trim("{$this->street_name} {$this->street_number}, {$this->city_name}, {$this->state_name}");
-        $data['latitude'] = (float) $this->latitude;
-        $data['longitude'] = (float) $this->longitude;
+        $data['latitude'] = $this->latitude !== '' ? (float) $this->latitude : null;
+        $data['longitude'] = $this->longitude !== '' ? (float) $this->longitude : null;
 
         $partner = $this->partnerId
             ? VendingPartner::where('company_id', auth()->user()->company_id)->findOrFail($this->partnerId)
             : new VendingPartner();
+
         $partner->fill($data)->save();
+        $this->partnerId = $partner->id;
+
+        if ($connect) {
+            $return = $this->returnToMachine ? 'machine' : 'partners';
+            $this->redirect(route('vending.mercadopago.connect', ['partner' => $partner->id, 'return' => $return]), navigate: false);
+            return;
+        }
 
         if ($partner->hasMercadoPagoConnection()) {
             try {
@@ -81,6 +118,12 @@ class PartnerForm extends Component
         }
 
         session()->flash('message', 'Comercio guardado correctamente.');
+
+        if ($this->returnToMachine) {
+            $this->redirect(route('vending.machines.create', ['partner' => $partner->id]), navigate: true);
+            return;
+        }
+
         $this->redirect(route('vending.partners.index'), navigate: true);
     }
 
