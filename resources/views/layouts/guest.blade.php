@@ -1,3 +1,23 @@
 <!DOCTYPE html>
-<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{ $title ?? 'Gestión Fábrica' }}</title>@vite(['resources/css/app.css','resources/js/app.js'])@livewireStyles</head>
-<body class="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4"><div class="w-full max-w-md">@if(session()->has('error'))<div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-md text-sm">{{ session('error') }}</div>@endif{{ $slot }}<div class="mt-5 text-center text-xs text-gray-500 space-x-3"><a href="{{ route('legal.privacy') }}" class="hover:underline">Privacidad</a><a href="{{ route('legal.cookies') }}" class="hover:underline">Cookies</a></div></div>@livewireScripts</body></html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ $title ?? 'Rapi Burguer' }}</title>
+    @vite(['resources/css/app.css','resources/js/app.js'])
+    @livewireStyles
+</head>
+<body class="min-h-screen bg-gradient-to-br from-red-50 via-white to-yellow-50 flex flex-col items-center justify-center p-4">
+    <div class="w-full max-w-md">
+        @if(session()->has('error'))
+            <div class="mb-4 p-3 bg-red-100 border border-red-300 text-red-800 rounded-lg text-sm">{{ session('error') }}</div>
+        @endif
+        {{ $slot }}
+        <div class="mt-5 text-center text-xs text-gray-500 space-x-3">
+            <a href="{{ route('legal.privacy') }}" class="hover:text-red-700 hover:underline">Privacidad</a>
+            <a href="{{ route('legal.cookies') }}" class="hover:text-red-700 hover:underline">Cookies</a>
+        </div>
+    </div>
+    @livewireScripts
+</body>
+</html>
