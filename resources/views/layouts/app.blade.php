@@ -20,13 +20,18 @@
             <a href="{{ route('dashboard') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('dashboard') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🏠 <span class="ml-3">Inicio</span></a>
             <a href="{{ route('inventory.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('inventory.index') || request()->routeIs('inventory.entry') || request()->routeIs('inventory.exit') || request()->routeIs('inventory.adjust') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">📋 <span class="ml-3">Inventario</span></a>
             <a href="{{ route('inventory.movements') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('inventory.movements') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧾 <span class="ml-3">Movimientos</span></a>
+
+            @can('simulate-production')
+                <div class="pt-4 pb-2"><p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Producción</p></div>
+                <a href="{{ route('production.calculator') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('production.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧮 <span class="ml-3">Simulador</span></a>
+            @endcan
+
             @can('owner-only')
+                <div class="pt-4 pb-2"><p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Administración</p></div>
                 <a href="{{ route('products.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('products.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">📦 <span class="ml-3">Productos</span></a>
                 <a href="{{ route('suppliers.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('suppliers.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">👥 <span class="ml-3">Proveedores</span></a>
                 <a href="{{ route('purchases.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('purchases.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🛒 <span class="ml-3">Compras</span></a>
                 <a href="{{ route('vending.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('vending.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🏪 <span class="ml-3">Máquinas</span></a>
-                <div class="pt-4 pb-2"><p class="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Producción</p></div>
-                <a href="{{ route('production.calculator') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-md {{ request()->routeIs('production.*') ? 'bg-gray-100 text-gray-900' : 'text-gray-600 hover:bg-gray-50' }}">🧮 <span class="ml-3">Calculadora</span></a>
             @endcan
         </nav>
         <div class="px-6 py-6 mt-6 border-t text-xs text-gray-500 space-y-1"><a href="{{ route('legal.privacy') }}" target="_blank" class="block hover:text-gray-700">Privacidad</a><a href="{{ route('legal.cookies') }}" target="_blank" class="block hover:text-gray-700">Cookies</a></div>
