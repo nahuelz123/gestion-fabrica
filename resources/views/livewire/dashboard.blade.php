@@ -1,13 +1,74 @@
 <div>
-@if($alerts->isNotEmpty())<div class="mb-6 bg-red-50 border border-red-200 rounded-lg p-4"><h3 class="text-sm font-semibold text-red-800">⚠️ {{ $alerts->count() }} {{ $alerts->count() === 1 ? 'producto' : 'productos' }} con stock crítico</h3><div class="mt-2 space-y-1">@foreach($alerts as $product)<div class="flex justify-between text-sm gap-4"><span class="text-red-700 font-medium">{{ $product->name }}</span><span class="text-gray-600">{{ rtrim(rtrim($product->total_stock ?? '0','0'),'.') }} {{ $product->baseUnit->abbreviation ?? '' }}</span></div>@endforeach</div><a href="{{ route('inventory.index') }}" wire:navigate class="inline-block mt-3 text-sm text-red-700 underline">Ver inventario →</a></div>@endif
-<div class="mb-6"><h1 class="text-2xl font-bold text-gray-800">Bienvenido, {{ auth()->user()->name }}</h1><p class="text-gray-500 mt-1 text-sm">{{ auth()->user()->isManager() ? 'Tu acceso está limitado a la gestión de inventario.' : '¿Qué necesitás hacer hoy?' }}</p></div>
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-<a href="{{ route('inventory.index') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">📋 <span class="ml-2 font-semibold">Ver stock actual</span><p class="text-xs text-gray-500 mt-2">Cantidades por depósito, lote y vencimiento.</p></a>
-<a href="{{ route('inventory.entry') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">➕ <span class="ml-2 font-semibold">Registrar entrada</span><p class="text-xs text-gray-500 mt-2">Ingresá mercadería o insumos.</p></a>
-<a href="{{ route('inventory.exit') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">➖ <span class="ml-2 font-semibold">Registrar salida / merma</span><p class="text-xs text-gray-500 mt-2">Descontá consumos, pérdidas o ajustes.</p></a>
-<a href="{{ route('inventory.adjust') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">± <span class="ml-2 font-semibold">Ajustar inventario</span><p class="text-xs text-gray-500 mt-2">Ajuste por depósito con trazabilidad.</p></a>
-<a href="{{ route('inventory.movements') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">🧾 <span class="ml-2 font-semibold">Historial</span><p class="text-xs text-gray-500 mt-2">Auditá quién modificó stock y por qué.</p></a>
-@if(auth()->user()->isOwner())<a href="{{ route('production.calculator') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">🧮 <span class="ml-2 font-semibold">Producción</span><p class="text-xs text-gray-500 mt-2">Simulá y registrá producción.</p></a><a href="{{ route('purchases.create') }}" wire:navigate class="bg-white rounded-xl border p-6 hover:shadow-md">🛒 <span class="ml-2 font-semibold">Nueva compra</span></a>@endif
-</div>
-@if(auth()->user()->isOwner())<div class="mt-10"><div class="text-xs font-semibold text-gray-400 uppercase mb-4">Administración</div><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"><a href="{{ route('products.index') }}" wire:navigate class="bg-gray-50 rounded-xl border p-4">📦 Productos</a><a href="{{ route('suppliers.index') }}" wire:navigate class="bg-gray-50 rounded-xl border p-4">👥 Proveedores</a><a href="{{ route('purchases.index') }}" wire:navigate class="bg-gray-50 rounded-xl border p-4">🛒 Compras</a><a href="{{ route('vending.index') }}" wire:navigate class="bg-gray-50 rounded-xl border p-4">🏪 Máquinas</a></div></div>@endif
+    @if($alerts->isNotEmpty())
+        <div class="mb-6 bg-red-50 border border-red-200 rounded-xl p-4">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                    <h3 class="text-sm font-semibold text-red-800">⚠️ {{ $alerts->count() }} {{ $alerts->count() === 1 ? 'producto necesita atención' : 'productos necesitan atención' }}</h3>
+                    <p class="text-xs text-red-700 mt-1">Hay stock en cero o por debajo del mínimo configurado.</p>
+                </div>
+                <a href="{{ route('inventory.index') }}" wire:navigate class="text-sm font-medium text-red-700 underline">Revisar stock →</a>
+            </div>
+        </div>
+    @endif
+
+    <div class="mb-7">
+        <h1 class="text-2xl font-bold text-gray-900">Hola, {{ auth()->user()->name }}</h1>
+        <p class="text-gray-500 mt-1 text-sm">Elegí lo que necesitás hacer. El sistema se ocupa del resto.</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <a href="{{ route('production.calculator') }}" wire:navigate class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-md transition">
+            <div class="text-3xl">🏭</div>
+            <h2 class="mt-3 font-semibold text-gray-900">Producción</h2>
+            <p class="text-sm text-gray-500 mt-1">Comprobá un pedido y registrá los carros o bandejas hechos.</p>
+        </a>
+
+        <a href="{{ route('inventory.adjust') }}" wire:navigate class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-md transition">
+            <div class="text-3xl">📦</div>
+            <h2 class="mt-3 font-semibold text-gray-900">Contar stock</h2>
+            <p class="text-sm text-gray-500 mt-1">Poné lo que contaste y el sistema registra la diferencia.</p>
+        </a>
+
+        <a href="{{ route('inventory.index') }}" wire:navigate class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-md transition">
+            <div class="text-3xl">🔎</div>
+            <h2 class="mt-3 font-semibold text-gray-900">Consultar stock</h2>
+            <p class="text-sm text-gray-500 mt-1">Buscá cualquier producto y mirá cuánto queda.</p>
+        </a>
+
+        <a href="{{ route('inventory.movements') }}" wire:navigate class="bg-white rounded-2xl border border-gray-200 p-6 hover:shadow-md transition">
+            <div class="text-3xl">🧾</div>
+            <h2 class="mt-3 font-semibold text-gray-900">Movimientos</h2>
+            <p class="text-sm text-gray-500 mt-1">Revisá qué cambió, cuándo y quién lo hizo.</p>
+        </a>
+    </div>
+
+    @if(auth()->user()->isOwner())
+        <div class="mt-10">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-gray-900">Gestión del negocio</h2>
+                    <p class="text-sm text-gray-500">Lo administrativo queda separado de la operación diaria.</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <a href="{{ route('purchases.create') }}" wire:navigate class="bg-blue-50 border border-blue-100 rounded-xl p-5 hover:shadow-sm transition">
+                    <div class="font-semibold text-blue-900">🛒 Registrar compra</div>
+                    <p class="text-xs text-blue-700 mt-1">Ingresá mercadería comprada.</p>
+                </a>
+                <a href="{{ route('products.index') }}" wire:navigate class="bg-gray-50 border rounded-xl p-5 hover:shadow-sm transition">
+                    <div class="font-semibold text-gray-900">📦 Productos y recetas</div>
+                    <p class="text-xs text-gray-500 mt-1">Configuración del catálogo.</p>
+                </a>
+                <a href="{{ route('suppliers.index') }}" wire:navigate class="bg-gray-50 border rounded-xl p-5 hover:shadow-sm transition">
+                    <div class="font-semibold text-gray-900">👥 Proveedores</div>
+                    <p class="text-xs text-gray-500 mt-1">Datos de compra y contacto.</p>
+                </a>
+                <a href="{{ route('vending.index') }}" wire:navigate class="bg-gray-50 border rounded-xl p-5 hover:shadow-sm transition">
+                    <div class="font-semibold text-gray-900">🏪 Máquinas</div>
+                    <p class="text-xs text-gray-500 mt-1">Ventas, kioscos y Mercado Pago.</p>
+                </a>
+            </div>
+        </div>
+    @endif
 </div>
