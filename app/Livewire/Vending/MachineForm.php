@@ -16,17 +16,11 @@ use Throwable;
 class MachineForm extends Component
 {
     public ?int $machineId = null;
-    public string $code = '';
-    public string $name = '';
     public ?int $vending_partner_id = null;
     public ?int $product_id = null;
     public string $partnerSearch = '';
     public string $productSearch = '';
-    public string $location = '';
     public string $sale_price = '';
-    public string $capacity = '';
-    public string $loaded_units = '0';
-    public string $status = 'active';
 
     public function mount(?int $id = null): void
     {
@@ -43,18 +37,13 @@ class MachineForm extends Component
         $machine = VendingMachine::where('company_id', auth()->user()->company_id)
             ->with(['partner:id,name', 'product:id,name'])
             ->findOrFail($id);
+
         $this->machineId = $machine->id;
-        $this->code = $machine->code;
-        $this->name = $machine->name;
         $this->vending_partner_id = $machine->vending_partner_id;
         $this->product_id = $machine->product_id;
         $this->partnerSearch = (string) ($machine->partner?->name ?? '');
         $this->productSearch = (string) ($machine->product?->name ?? '');
-        $this->location = (string) $machine->location;
         $this->sale_price = (string) $machine->sale_price;
-        $this->capacity = (string) ($machine->capacity ?? '');
-        $this->loaded_units = (string) $machine->loaded_units;
-        $this->status = $machine->status;
     }
 
     public function save(MercadoPagoVendingService $service): void
@@ -62,43 +51,18 @@ class MachineForm extends Component
         Gate::authorize('owner-only');
         $companyId = auth()->user()->company_id;
 
-        $this->validate([
+        $data = $this->validate([
             'vending_partner_id' => ['required', 'integer', Rule::exists('vending_partners', 'id')->where('company_id', $companyId)],
             'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('company_id', $companyId)->where('type', 'finished_product')],
+            'sale_price' => 'required|numeric|min:1|max:99999999',
         ], [
             'vending_partner_id.required' => 'Elegí el comercio donde está la máquina.',
             'product_id.required' => 'Elegí la hamburguesa que vende la máquina.',
+            'sale_price.required' => 'Ingresá el precio de venta.',
         ]);
 
         $partner = VendingPartner::where('company_id', $companyId)->findOrFail($this->vending_partner_id);
         $product = Product::where('company_id', $companyId)->where('type', 'finished_product')->findOrFail($this->product_id);
-
-        if (trim($this->code) === '') {
-            $this->code = $this->generateCode($companyId);
-        }
-        if (trim($this->name) === '') {
-            $this->name = 'Máquina ' . $partner->name;
-        }
-
-        $data = $this->validate([
-            'code' => ['required', 'string', 'max:50', Rule::unique('vending_machines', 'code')->where('company_id', $companyId)->ignore($this->machineId)],
-            'name' => 'required|string|max:255',
-            'vending_partner_id' => ['required', 'integer', Rule::exists('vending_partners', 'id')->where('company_id', $companyId)],
-            'product_id' => ['required', 'integer', Rule::exists('products', 'id')->where('company_id', $companyId)->where('type', 'finished_product')],
-            'location' => 'nullable|string|max:255',
-            'sale_price' => 'required|numeric|min:1|max:99999999',
-            'capacity' => 'nullable|integer|min:1|max:100000',
-            'loaded_units' => 'required|integer|min:0|max:100000',
-            'status' => 'required|in:active,inactive',
-        ], [
-            'sale_price.required' => 'Ingresá el precio de venta.',
-            'loaded_units.required' => 'Indicá cuántas hamburguesas cargaste en la máquina.',
-        ]);
-
-        if ($this->capacity !== '' && (int) $this->loaded_units > (int) $this->capacity) {
-            $this->addError('loaded_units', 'Las hamburguesas cargadas no pueden superar la capacidad de la máquina.');
-            return;
-        }
 
         $machine = $this->machineId
             ? VendingMachine::where('company_id', $companyId)->with('partner')->findOrFail($this->machineId)
@@ -109,9 +73,7 @@ class MachineForm extends Component
             || (int) $machine->vending_partner_id !== (int) $this->vending_partner_id
             || (int) $machine->product_id !== (int) $this->product_id;
 
-        if ($machine->exists
-            && ($forceOrder || $this->status !== 'active' || (int) $this->loaded_units <= 0)
-            && $machine->partner?->hasMercadoPagoConnection()) {
+        if ($machine->exists && $forceOrder && $machine->partner?->hasMercadoPagoConnection()) {
             try {
                 $service->cancelActiveOrders($machine);
             } catch (Throwable $e) {
@@ -121,30 +83,35 @@ class MachineForm extends Component
             }
         }
 
-        $data['company_id'] = $companyId;
-        $data['capacity'] = $this->capacity !== '' ? (int) $this->capacity : null;
-        $data['sale_price'] = (float) $this->sale_price;
-        $data['loaded_units'] = (int) $this->loaded_units;
-        $machine->fill($data)->save();
+        if (!$machine->exists) {
+            $machine->code = $this->generateCode($companyId);
+            $machine->name = 'Máquina ' . $partner->name;
+            $machine->status = 'active';
+        } elseif ((int) $machine->vending_partner_id !== (int) $partner->id) {
+            $machine->name = 'Máquina ' . $partner->name;
+        }
+
+        $machine->fill([
+            'company_id' => $companyId,
+            'vending_partner_id' => $partner->id,
+            'product_id' => $product->id,
+            'sale_price' => (float) $data['sale_price'],
+        ])->save();
 
         if (!$partner->hasMercadoPagoConnection()) {
-            session()->flash('message', 'Máquina guardada. Falta un solo paso: vincular Mercado Pago del comercio.');
+            session()->flash('message', 'Máquina guardada. Ahora vinculá Mercado Pago del comercio para empezar a registrar ventas.');
             $this->redirect(route('vending.partners.edit', ['id' => $partner->id, 'return' => 'machines']), navigate: true);
             return;
         }
 
-        if ($machine->status === 'active' && $machine->loaded_units > 0) {
+        if ($machine->status === 'active') {
             try {
-                $service->provisionMachine($machine->fresh(['partner', 'product']), false);
-                session()->flash('message', 'Máquina lista. El QR de Mercado Pago quedó sincronizado.');
+                $service->provisionMachine($machine->fresh(['partner', 'product']), $forceOrder);
+                session()->flash('message', 'Máquina lista. Cada pago aprobado quedará registrado como una venta.');
             } catch (Throwable $e) {
                 report($e);
                 session()->flash('error', 'La máquina se guardó, pero todavía no quedó lista para cobrar: ' . $e->getMessage());
             }
-        } elseif ($machine->loaded_units <= 0) {
-            session()->flash('message', 'Máquina guardada sin stock. El QR se mostrará cuando cargues unidades.');
-        } else {
-            session()->flash('message', 'Máquina guardada.');
         }
 
         $this->redirect(route('vending.index'), navigate: true);
