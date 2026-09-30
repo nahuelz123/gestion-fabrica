@@ -26,9 +26,8 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/inventario/movimientos', \App\Livewire\Inventory\StockMovements::class)->name('inventory.movements');
     });
 
-    // El gerente puede usar el simulador para comprobar si un pedido de
-    // producción es posible. Registrar producción sigue siendo exclusivo del dueño.
-    Route::middleware('can:simulate-production')->group(function () {
+    // Dueños y encargado pueden comprobar y registrar la producción del turno.
+    Route::middleware('can:manage-production')->group(function () {
         Route::get('/produccion/calculadora', \App\Livewire\Production\Calculator::class)->name('production.calculator');
     });
 
