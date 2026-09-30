@@ -22,7 +22,7 @@ class StockManager extends Component
     public int $perPage = 25;
     public ?int $selectedProductId = null;
     public string $warehouse_id = '';
-    public string $adjustMode = 'add';
+    public string $adjustMode = 'set';
     public string $adjustQty = '';
     public string $adjustPresentationId = '';
     public ?string $successMessage = null;
@@ -43,7 +43,11 @@ class StockManager extends Component
         Gate::authorize('manage-stock');
         Product::where('company_id', auth()->user()->company_id)->findOrFail($productId);
         $this->selectedProductId = $productId;
-        $this->adjustQty = ''; $this->adjustPresentationId = ''; $this->successMessage = null; $this->errorMessage = null;
+        $this->adjustMode = 'set';
+        $this->adjustQty = '';
+        $this->adjustPresentationId = '';
+        $this->successMessage = null;
+        $this->errorMessage = null;
     }
 
     public function applyAdjustment(StockService $stockService): void
@@ -75,16 +79,16 @@ class StockManager extends Component
                     'company_id' => $companyId, 'product_id' => $product->id, 'warehouse_id' => $warehouse->id,
                     'type' => $diff > 0 ? MovementType::AdjustmentIn : MovementType::AdjustmentOut,
                     'quantity_base' => abs($diff), 'user_id' => $user->id, 'channel' => Channel::Web,
-                    'reason' => 'Ajuste manual web: establecer stock',
+                    'reason' => 'Recuento físico de stock',
                 ]);
-                $this->successMessage = "Stock de {$product->name} en {$warehouse->name} actualizado a {$qty} u.";
+                $this->successMessage = "Listo. {$product->name} quedó en {$qty} u en {$warehouse->name}.";
             } else {
                 $type = $this->adjustMode === 'subtract' ? MovementType::AdjustmentOut : MovementType::AdjustmentIn;
                 $stockService->registerMovement([
                     'company_id' => $companyId, 'product_id' => $product->id, 'warehouse_id' => $warehouse->id, 'type' => $type,
                     'quantity_base' => $qty, 'presentation_id' => $presentationId, 'presentation_quantity' => $presentationQty,
                     'user_id' => $user->id, 'channel' => Channel::Web,
-                    'reason' => $this->adjustMode === 'subtract' ? 'Ajuste manual web: egreso' : 'Ajuste manual web: ingreso',
+                    'reason' => $this->adjustMode === 'subtract' ? 'Corrección manual: egreso' : 'Corrección manual: ingreso',
                 ]);
                 $newTotal = (float) Stock::where('company_id', $companyId)->where('product_id', $product->id)->where('warehouse_id', $warehouse->id)->sum('quantity');
                 $verb = $this->adjustMode === 'subtract' ? 'Desconté' : 'Sumé';
