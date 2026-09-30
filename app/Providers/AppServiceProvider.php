@@ -25,6 +25,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('manage-users', fn (User $user) => $user->isOwner());
         Gate::define('owner-only', fn (User $user) => $user->isOwner());
         Gate::define('manage-stock', fn (User $user) => $user->canManageStock());
-        Gate::define('simulate-production', fn (User $user) => $user->canSimulateProduction());
+        Gate::define('manage-production', fn (User $user) => $user->canManageProduction());
+        // Alias conservado para no romper enlaces/componentes previos.
+        Gate::define('simulate-production', fn (User $user) => $user->canManageProduction());
     }
 }
