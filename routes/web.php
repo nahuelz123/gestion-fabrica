@@ -26,6 +26,12 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/inventario/movimientos', \App\Livewire\Inventory\StockMovements::class)->name('inventory.movements');
     });
 
+    // El gerente puede usar el simulador para comprobar si un pedido de
+    // producción es posible. Registrar producción sigue siendo exclusivo del dueño.
+    Route::middleware('can:simulate-production')->group(function () {
+        Route::get('/produccion/calculadora', \App\Livewire\Production\Calculator::class)->name('production.calculator');
+    });
+
     Route::middleware('can:owner-only')->group(function () {
         Route::get('/productos', Products\Index::class)->name('products.index');
         Route::get('/productos/crear', Products\Form::class)->name('products.create');
@@ -37,7 +43,6 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/compras/crear', \App\Livewire\Purchases\Form::class)->name('purchases.create');
         Route::get('/compras/{id}', \App\Livewire\Purchases\Show::class)->name('purchases.show');
         Route::get('/productos/{productId}/receta', \App\Livewire\Recipes\Manager::class)->name('recipes.manager');
-        Route::get('/produccion/calculadora', \App\Livewire\Production\Calculator::class)->name('production.calculator');
         Route::get('/maquinas', \App\Livewire\Vending\Index::class)->name('vending.index');
         Route::get('/maquinas/crear', \App\Livewire\Vending\MachineForm::class)->name('vending.machines.create');
         Route::get('/maquinas/{id}/editar', \App\Livewire\Vending\MachineForm::class)->name('vending.machines.edit');
