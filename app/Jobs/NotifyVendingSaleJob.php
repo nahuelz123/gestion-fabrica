@@ -31,21 +31,16 @@ class NotifyVendingSaleJob implements ShouldQueue
         if ($sale->status === 'refunded' || $sale->status === 'partially_refunded') {
             $title = $sale->status === 'refunded' ? '↩️ <b>Venta reembolsada</b>' : '↩️ <b>Reembolso parcial</b>';
             $message = $title . "\n"
-                . "Recibo interno: {$safe($sale->receipt_number)}\n"
-                . "Comercio: {$safe($sale->partner->name)}\n"
-                . "Máquina: {$safe($sale->machine->name)}\n"
-                . 'Cobro original: $' . number_format((float) $sale->gross_amount, 2, ',', '.') . "\n"
-                . 'Reembolsado: $' . number_format((float) $sale->refunded_amount, 2, ',', '.') . "\n"
-                . '<b>Saldo para la hamburguesería: $' . number_format((float) $sale->factory_amount, 2, ',', '.') . '</b>';
-        } else {
-            $message = "🍔 <b>Venta de máquina confirmada</b>\n"
-                . "Recibo interno: {$safe($sale->receipt_number)}\n"
-                . "Comercio: {$safe($sale->partner->name)}\n"
+                . "Kiosco: {$safe($sale->partner->name)}\n"
                 . "Máquina: {$safe($sale->machine->name)}\n"
                 . "Producto: {$safe($sale->product->name)}\n"
-                . 'Total cobrado: $' . number_format((float) $sale->gross_amount, 2, ',', '.') . "\n"
-                . 'Comisión kiosco: $' . number_format((float) $sale->commission_amount, 2, ',', '.') . "\n"
-                . '<b>Para la hamburguesería: $' . number_format((float) $sale->factory_amount, 2, ',', '.') . '</b>';
+                . 'Importe: $' . number_format(max(0, (float) $sale->gross_amount - (float) $sale->refunded_amount), 2, ',', '.');
+        } else {
+            $message = "🍔 <b>Nueva venta de máquina</b>\n"
+                . "Kiosco: {$safe($sale->partner->name)}\n"
+                . "Máquina: {$safe($sale->machine->name)}\n"
+                . "Producto: {$safe($sale->product->name)}\n"
+                . 'Importe: $' . number_format((float) $sale->gross_amount, 2, ',', '.');
         }
 
         User::where('company_id', $sale->company_id)
