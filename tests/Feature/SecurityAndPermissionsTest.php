@@ -35,7 +35,7 @@ class SecurityAndPermissionsTest extends TestCase
         $this->manager = User::create(['company_id'=>$this->company->id,'name'=>'Encargado','email'=>'manager@example.test','password'=>'secret123','role'=>'manager','status'=>'active']);
     }
 
-    public function test_manager_can_reach_inventory_and_simulator_but_not_administration(): void
+    public function test_manager_can_reach_inventory_and_production_but_not_administration(): void
     {
         $this->actingAs($this->manager);
 
@@ -58,7 +58,7 @@ class SecurityAndPermissionsTest extends TestCase
         $this->get('/maquinas')->assertOk();
     }
 
-    public function test_manager_bot_permissions_include_read_only_production_simulation(): void
+    public function test_manager_bot_permissions_include_stock_and_operational_production(): void
     {
         $this->assertTrue($this->manager->canUseBotAction('get_stock'));
         $this->assertTrue($this->manager->canUseBotAction('add_stock'));
@@ -68,14 +68,14 @@ class SecurityAndPermissionsTest extends TestCase
         $this->assertTrue($this->manager->canUseBotAction('get_max_production'));
         $this->assertTrue($this->manager->canUseBotAction('get_missing_inputs'));
         $this->assertTrue($this->manager->canUseBotAction('plan_production'));
+        $this->assertTrue($this->manager->canUseBotAction('register_production'));
 
         $this->assertFalse($this->manager->canUseBotAction('create_product'));
         $this->assertFalse($this->manager->canUseBotAction('create_recipe'));
-        $this->assertFalse($this->manager->canUseBotAction('register_production'));
         $this->assertTrue($this->owner->canUseBotAction('register_production'));
     }
 
-    public function test_manager_can_run_real_simulation_without_creating_production_order(): void
+    public function test_manager_can_confirm_one_cart_and_actual_consumption(): void
     {
         $unit = Unit::create(['name'=>'Unidad','abbreviation'=>'u','type'=>'count']);
         $category = ProductCategory::create(['company_id'=>$this->company->id,'name'=>'Producción']);
@@ -103,23 +103,37 @@ class SecurityAndPermissionsTest extends TestCase
             'yield_quantity'=>24,
         ]);
         RecipeItem::create(['recipe_id'=>$recipe->id,'product_id'=>$ingredient->id,'quantity_base'=>24]);
+        $warehouseId = Warehouse::where('company_id',$this->company->id)->value('id');
         Stock::create([
             'company_id'=>$this->company->id,
             'product_id'=>$ingredient->id,
-            'warehouse_id'=>Warehouse::where('company_id',$this->company->id)->value('id'),
-            'quantity'=>48,
+            'warehouse_id'=>$warehouseId,
+            'quantity'=>400,
         ]);
 
         Livewire::actingAs($this->manager)
             ->test(Calculator::class)
             ->set('product_id', (string) $finished->id)
-            ->set('target_quantity', '24')
+            ->set('carros', '1')
+            ->set('bandejas', '0')
             ->call('calculate')
+            ->assertSet('target_quantity', '288')
             ->assertSet('result.can_produce', true)
-            ->assertSee('Modo simulación');
+            ->assertSee('Confirmar producción realizada')
+            ->set('actual_consumptions.'.$ingredient->id, '280')
+            ->call('confirm')
+            ->assertSet('successMessage', '✅ Producción registrada. Se descontaron los consumos informados y se sumó el producto terminado.');
 
-        $this->assertDatabaseCount('production_orders', 0);
-        $this->assertSame(0, ProductionOrder::count());
+        $this->assertSame(120.0, (float) Stock::where('product_id',$ingredient->id)->sum('quantity'));
+        $this->assertSame(288.0, (float) Stock::where('product_id',$finished->id)->sum('quantity'));
+        $this->assertDatabaseHas('production_orders', [
+            'company_id'=>$this->company->id,
+            'product_id'=>$finished->id,
+            'target_quantity'=>288,
+            'user_id'=>$this->manager->id,
+            'status'=>'completed',
+        ]);
+        $this->assertSame(1, ProductionOrder::count());
     }
 
     public function test_inactive_authenticated_user_is_logged_out(): void
