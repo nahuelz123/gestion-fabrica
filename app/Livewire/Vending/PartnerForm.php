@@ -14,17 +14,12 @@ class PartnerForm extends Component
 {
     public ?int $partnerId = null;
     public string $name = '';
-    public string $contact_name = '';
-    public string $phone = '';
     public string $street_name = '';
     public string $street_number = '';
     public string $city_name = 'Mar del Plata';
     public string $state_name = 'Buenos Aires';
-    public string $location_reference = '';
     public string $latitude = '';
     public string $longitude = '';
-    public string $commission_percent = '0';
-    public string $status = 'active';
     public bool $returnToMachine = false;
     public bool $returnToMachines = false;
 
@@ -39,11 +34,7 @@ class PartnerForm extends Component
 
         $partner = VendingPartner::where('company_id', auth()->user()->company_id)->findOrFail($id);
         $this->partnerId = $partner->id;
-        foreach ([
-            'name', 'contact_name', 'phone', 'street_name', 'street_number',
-            'city_name', 'state_name', 'location_reference', 'latitude', 'longitude',
-            'commission_percent', 'status',
-        ] as $field) {
+        foreach (['name', 'street_name', 'street_number', 'city_name', 'state_name', 'latitude', 'longitude'] as $field) {
             $this->{$field} = (string) ($partner->{$field} ?? '');
         }
     }
@@ -64,15 +55,10 @@ class PartnerForm extends Component
 
         $rules = [
             'name' => 'required|string|max:255',
-            'contact_name' => 'nullable|string|max:255',
-            'phone' => 'nullable|string|max:100',
             'street_name' => 'required|string|max:255',
             'street_number' => 'required|string|max:50',
             'city_name' => 'required|string|max:255',
             'state_name' => 'required|string|max:255',
-            'location_reference' => 'nullable|string|max:255',
-            'commission_percent' => 'required|numeric|min:0|max:100',
-            'status' => 'required|in:active,inactive',
         ];
 
         if ($connect) {
@@ -92,6 +78,7 @@ class PartnerForm extends Component
         $data['address'] = trim("{$this->street_name} {$this->street_number}, {$this->city_name}, {$this->state_name}");
         $data['latitude'] = $this->latitude !== '' ? (float) $this->latitude : null;
         $data['longitude'] = $this->longitude !== '' ? (float) $this->longitude : null;
+        $data['commission_percent'] = 0;
 
         $partner = $this->partnerId
             ? VendingPartner::where('company_id', auth()->user()->company_id)->findOrFail($this->partnerId)
