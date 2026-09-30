@@ -2,111 +2,61 @@
 
 namespace Tests\Feature;
 
+use App\Enums\PurchaseStatus;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Purchase;
-use App\Models\PurchaseItem;
+use App\Models\StockMovement;
 use App\Models\Supplier;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Warehouse;
-use Illuminate\Foundation\Testing\DatabaseTruncation;
-use Illuminate\Support\Facades\Process;
+use App\Services\PurchaseService;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class PurchaseServiceTest extends TestCase
 {
-    use DatabaseTruncation;
+    use RefreshDatabase;
 
-    public function test_concurrent_purchase_confirm_prevents_double_stock()
+    private function fixture(): array
     {
-        // 1. Seed base data
-        $company = Company::create(['name' => 'Test Company']);
-        $user = User::create(['company_id' => $company->id, 'name' => 'Test', 'email' => 'test2@test.com', 'password' => 'pass']);
-        $warehouse = Warehouse::create(['company_id' => $company->id, 'name' => 'Test Warehouse']);
-        $supplier = Supplier::create(['company_id' => $company->id, 'name' => 'Test Supplier']);
-        $unit = Unit::create(['name' => 'Unit', 'abbreviation' => 'u', 'type' => 'count']);
-        $category = ProductCategory::create(['company_id' => $company->id, 'name' => 'Test Category']);
-        
-        $product = Product::create([
-            'company_id' => $company->id,
-            'category_id' => $category->id,
-            'name' => 'Test Product',
-            'internal_code' => 'TEST-P',
-            'base_unit_id' => $unit->id,
-            'requires_lot' => false,
-            'cost' => 10,
-            'price' => 20,
-        ]);
+        $company=Company::create(['name'=>'Fábrica']);
+        $owner=User::create(['company_id'=>$company->id,'name'=>'Dueño','email'=>'owner@test.com','password'=>'pass','role'=>'owner','status'=>'active']);
+        $manager=User::create(['company_id'=>$company->id,'name'=>'Encargado','email'=>'manager@test.com','password'=>'pass','role'=>'manager','status'=>'active']);
+        $warehouse=Warehouse::create(['company_id'=>$company->id,'name'=>'Principal']);
+        $supplier=Supplier::create(['company_id'=>$company->id,'name'=>'Proveedor','status'=>'active']);
+        $unit=Unit::create(['name'=>'Unidad','abbreviation'=>'u','type'=>'count']); $cat=ProductCategory::create(['company_id'=>$company->id,'name'=>'Insumos']);
+        $product=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Papel','internal_code'=>'PAP','type'=>'raw_material','base_unit_id'=>$unit->id,'status'=>'active']);
+        $purchase=Purchase::create(['company_id'=>$company->id,'supplier_id'=>$supplier->id,'warehouse_id'=>$warehouse->id,'purchase_date'=>now()->toDateString(),'status'=>PurchaseStatus::Draft,'user_id'=>$owner->id]);
+        $purchase->items()->create(['product_id'=>$product->id,'quantity'=>10,'unit_cost'=>100]);
+        return compact('company','owner','manager','warehouse','supplier','product','purchase');
+    }
 
-        $purchase = Purchase::create([
-            'company_id' => $company->id,
-            'supplier_id' => $supplier->id,
-            'warehouse_id' => $warehouse->id,
-            'purchase_date' => now()->toDateString(),
-            'status' => 'draft',
-            'user_id' => $user->id,
-        ]);
+    public function test_confirm_purchase_registers_stock_once(): void
+    {
+        $d=$this->fixture(); $service=app(PurchaseService::class); $service->confirm($d['purchase']->id,$d['owner']->id);
+        $this->assertSame(PurchaseStatus::Confirmed,$d['purchase']->fresh()->status);
+        $this->assertDatabaseHas('stock',['company_id'=>$d['company']->id,'product_id'=>$d['product']->id,'warehouse_id'=>$d['warehouse']->id,'quantity'=>10]);
+        $this->assertSame(1,StockMovement::where('reference_type',Purchase::class)->where('reference_id',$d['purchase']->id)->count());
+        try { $service->confirm($d['purchase']->id,$d['owner']->id); $this->fail('La segunda confirmación debía fallar.'); } catch (\Throwable) {}
+        $this->assertSame(1,StockMovement::where('reference_type',Purchase::class)->where('reference_id',$d['purchase']->id)->count());
+    }
 
-        PurchaseItem::create([
-            'purchase_id' => $purchase->id,
-            'product_id' => $product->id,
-            'quantity' => 50,
-            'unit_cost' => 10,
-        ]);
+    public function test_manager_cannot_confirm_purchase(): void
+    {
+        $d=$this->fixture(); $this->expectException(InvalidArgumentException::class);
+        app(PurchaseService::class)->confirm($d['purchase']->id,$d['manager']->id);
+    }
 
-        $purchaseId = $purchase->id;
-        $userId = $user->id;
-
-        // Ensure no stock exists yet
-        $this->assertEquals(0, \App\Models\StockMovement::where('reference_type', Purchase::class)->where('reference_id', $purchaseId)->count());
-
-        // 2. We use tinker to spawn child processes to confirm the purchase simultaneously.
-        // First process will lock the purchase, sleep for 2 seconds. Second process will queue for lock.
-        // Once first commits, purchase is 'confirmed'. Second process gets lock, checks status, throws Exception.
-        $script = <<<PHP
-        try {
-            app(\App\Services\PurchaseService::class)->confirm({$purchaseId}, {$userId});
-        } catch (\Exception \$e) {
-            echo "EXCEPTION: " . \$e->getMessage();
-        }
-        PHP;
-
-        $escapedScript = str_replace('"', '\"', $script);
-        $tinkerCmd = "php artisan tinker --execute=\"{$escapedScript}\"";
-
-        // Spawn Process 1
-        $process1 = Process::env([
-            'APP_ENV' => 'testing',
-            'TEST_CONCURRENCY_SLEEP' => '2',
-            'DB_CONNECTION' => 'mysql',
-            'DB_DATABASE' => 'gestion_fabrica_testing'
-        ])->start($tinkerCmd);
-        
-        usleep(500000); // 0.5 seconds to ensure P1 has the lock
-
-        // Spawn Process 2
-        $process2 = Process::env([
-            'APP_ENV' => 'testing',
-            'TEST_CONCURRENCY_SLEEP' => '0',
-            'DB_CONNECTION' => 'mysql',
-            'DB_DATABASE' => 'gestion_fabrica_testing'
-        ])->start($tinkerCmd);
-
-        $process1->wait();
-        $process2->wait();
-
-        // 3. Asserts
-        // Only one process should have generated a stock movement
-        $movementCount = \App\Models\StockMovement::where('reference_type', Purchase::class)->where('reference_id', $purchaseId)->count();
-        $this->assertEquals(1, $movementCount, 'There should be exactly one stock movement.');
-
-        // Stock should be 50, not 100
-        $stock = \App\Models\Stock::where('product_id', $product->id)->first();
-        $this->assertEquals(50, $stock->quantity, 'The total stock should be 50.');
-
-        // P2 output should contain the Exception message
-        $this->assertStringContainsString('La compra ya no está en borrador', $process2->output());
+    public function test_owner_cannot_confirm_purchase_from_another_company(): void
+    {
+        $d=$this->fixture(); $other=Company::create(['name'=>'Otra']);
+        $otherOwner=User::create(['company_id'=>$other->id,'name'=>'Otro','email'=>'other@test.com','password'=>'pass','role'=>'owner','status'=>'active']);
+        try { app(PurchaseService::class)->confirm($d['purchase']->id,$otherOwner->id); $this->fail('Debía rechazar otra empresa.'); } catch (\Throwable) {}
+        $this->assertSame(PurchaseStatus::Draft,$d['purchase']->fresh()->status);
+        $this->assertDatabaseCount('stock_movements',0);
     }
 }

@@ -7,152 +7,77 @@ use App\Enums\MovementType;
 use App\Models\Product;
 use App\Models\ProductionOrder;
 use App\Models\Stock;
+use App\Models\User;
+use App\Models\Warehouse;
 use Exception;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class ProductionService
 {
-    public function __construct(
-        private ProductionCalculatorService $calculator,
-        private StockService $stockService
-    ) {}
+    public function __construct(private ProductionCalculatorService $calculator, private StockService $stockService) {}
 
-    public function executeProduction(
-        int $productId,
-        int $warehouseId,
-        float $targetQuantity,
-        array $outputLotData,
-        int $userId
-    ): ProductionOrder {
-        return DB::transaction(function () use ($productId, $warehouseId, $targetQuantity, $outputLotData, $userId) {
-            $product = Product::findOrFail($productId);
-            
-            // 1. Verificar simulación (es una doble validación de seguridad)
-            $calculation = $this->calculator->calculateRequirements($product, $targetQuantity);
-            
-            if (!$calculation['can_produce']) {
-                throw new Exception("No hay stock suficiente para producir la cantidad solicitada.");
-            }
+    public function executeProduction(int $productId, int $warehouseId, float $targetQuantity, array $outputLotData, int $userId): ProductionOrder
+    {
+        if (!is_finite($targetQuantity) || $targetQuantity <= 0) throw new InvalidArgumentException('La cantidad a producir debe ser mayor a 0.');
+        return DB::transaction(function () use ($productId,$warehouseId,$targetQuantity,$outputLotData,$userId) {
+            $user = User::whereKey($userId)->firstOrFail();
+            if (!$user->isActive() || !$user->isOwner()) throw new InvalidArgumentException('No tenés permiso para registrar producción.');
+            $companyId = $user->company_id;
+            $product = Product::where('company_id',$companyId)->whereKey($productId)->lockForUpdate()->firstOrFail();
+            $warehouse = Warehouse::where('company_id',$companyId)->whereKey($warehouseId)->firstOrFail();
+            $calculation = $this->calculator->calculateRequirements($product,$targetQuantity);
+            if (!$calculation['can_produce']) throw new Exception('No hay stock suficiente para producir la cantidad solicitada.');
 
-            // 2. Crear Orden
-            $order = ProductionOrder::create([
-                'company_id' => $product->company_id,
-                'product_id' => $product->id,
-                'warehouse_id' => $warehouseId,
-                'target_quantity' => $targetQuantity,
-                'status' => 'completed',
-                'user_id' => $userId,
-            ]);
+            $order = ProductionOrder::create(['company_id'=>$companyId,'product_id'=>$product->id,'warehouse_id'=>$warehouse->id,'target_quantity'=>$targetQuantity,'status'=>'completed','user_id'=>$user->id]);
 
-            // 3. Consumir Insumos respetando FEFO
             foreach ($calculation['items'] as $item) {
-                $ingredient = $item['ingredient'];
-                $pendingToConsume = $item['required'];
-                $totalConsumed = 0;
-
+                $ingredient = Product::where('company_id',$companyId)->whereKey($item['ingredient']->id)->firstOrFail();
+                $pending = (float)$item['required']; $totalConsumed = 0.0;
                 if ($ingredient->requires_lot) {
-                    // INSUMO CON LOTE: Estrategia FEFO
-                    // Obtenemos los lotes candidatos ordenados por vencimiento (solo el ID para iterar)
-                    $candidateLots = Stock::where('stock.company_id', $product->company_id)
-                        ->where('stock.product_id', $ingredient->id)
-                        ->where('stock.quantity', '>', 0)
-                        ->join('stock_lots', 'stock.lot_id', '=', 'stock_lots.id')
-                        ->orderBy('stock_lots.expiration_date', 'asc')
-                        ->pluck('stock.lot_id');
-
-                    foreach ($candidateLots as $lotId) {
-                        if ($pendingToConsume <= 0) break;
-
-                        // Leemos el stock actual EXACTO de este lote justo antes de consumirlo
-                        $currentStock = Stock::where('product_id', $ingredient->id)
-                            ->where('lot_id', $lotId)
-                            ->value('quantity') ?? 0;
-
-                        if ($currentStock > 0) {
-                            $consumeAmount = min($pendingToConsume, $currentStock);
-                            
-                            $this->stockService->registerMovement([
-                                'company_id' => $product->company_id,
-                                'product_id' => $ingredient->id,
-                                'warehouse_id' => $warehouseId,
-                                'type' => MovementType::ProductionConsumption,
-                                'quantity_base' => -$consumeAmount,
-                                'reference_type' => ProductionOrder::class,
-                                'reference_id' => $order->id,
-                                'user_id' => $userId,
-                                'channel' => Channel::Web,
-                                'lot_id' => $lotId,
-                            ]);
-
-                            $pendingToConsume -= $consumeAmount;
-                            $totalConsumed += $consumeAmount;
-                        }
+                    $candidateStocks = Stock::query()->where('stock.company_id',$companyId)->where('stock.product_id',$ingredient->id)
+                        ->where('stock.warehouse_id',$warehouse->id)->where('stock.quantity','>',0)->whereNotNull('stock.lot_id')
+                        ->join('stock_lots','stock.lot_id','=','stock_lots.id')
+                        ->orderByRaw('stock_lots.expiration_date IS NULL ASC')->orderBy('stock_lots.expiration_date')->orderBy('stock_lots.entry_date')
+                        ->select('stock.*')->lockForUpdate()->get();
+                    foreach ($candidateStocks as $stock) {
+                        if ($pending <= 0.000001) break;
+                        $consume = min($pending,(float)$stock->quantity);
+                        if ($consume <= 0) continue;
+                        $this->stockService->registerMovement([
+                            'company_id'=>$companyId,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,'lot_id'=>$stock->lot_id,
+                            'type'=>MovementType::ProductionConsumption,'quantity_base'=>$consume,'reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,
+                            'user_id'=>$user->id,'channel'=>Channel::Web,
+                        ]);
+                        $pending -= $consume; $totalConsumed += $consume;
                     }
                 } else {
-                    // INSUMO SIN LOTE: Consumo directo
-                    $currentStock = Stock::where('product_id', $ingredient->id)
-                        ->whereNull('lot_id')
-                        ->value('quantity') ?? 0;
-
-                    if ($currentStock >= $pendingToConsume) {
+                    $currentStock = (float)(Stock::where('company_id',$companyId)->where('product_id',$ingredient->id)->where('warehouse_id',$warehouse->id)->whereNull('lot_id')->lockForUpdate()->value('quantity') ?? 0);
+                    if ($currentStock >= $pending) {
                         $this->stockService->registerMovement([
-                            'company_id' => $product->company_id,
-                            'product_id' => $ingredient->id,
-                            'warehouse_id' => $warehouseId,
-                            'type' => MovementType::ProductionConsumption,
-                            'quantity_base' => -$pendingToConsume,
-                            'reference_type' => ProductionOrder::class,
-                            'reference_id' => $order->id,
-                            'user_id' => $userId,
-                            'channel' => Channel::Web,
-                            'lot_id' => null,
+                            'company_id'=>$companyId,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,'type'=>MovementType::ProductionConsumption,
+                            'quantity_base'=>$pending,'reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,'user_id'=>$user->id,'channel'=>Channel::Web,
                         ]);
-                        $totalConsumed += $pendingToConsume;
-                        $pendingToConsume = 0;
+                        $totalConsumed += $pending; $pending = 0;
                     }
                 }
-
-                // Si recorrimos los candidatos y no alcanzó (por concurrencia u otro motivo)
-                if (round($pendingToConsume, 4) > 0) {
-                    throw new Exception("No alcanza el stock de {$ingredient->name} al momento de confirmar, faltan {$pendingToConsume}.");
-                }
-
-                // Guardar el snapshot
-                $order->items()->create([
-                    'product_id' => $ingredient->id,
-                    'required_quantity' => $item['required'],
-                    'consumed_quantity' => $totalConsumed,
-                ]);
+                if ($pending > 0.0001) throw new Exception("No alcanza el stock de {$ingredient->name} al momento de confirmar, faltan {$pending}.");
+                $order->items()->create(['product_id'=>$ingredient->id,'required_quantity'=>$item['required'],'consumed_quantity'=>$totalConsumed]);
             }
 
-            // 4. Generar el Producto Terminado
-            $lotId = null;
-            if ($product->requires_lot) {
-                if (empty($outputLotData['lot_code'])) {
-                    throw new Exception("El producto final requiere un código de lote.");
-                }
+            if ($product->requires_lot && empty($outputLotData['lot_code'])) throw new Exception('El producto final requiere un código de lote.');
+            if ($product->requires_expiration && empty($outputLotData['expiration_date'])) {
+                if ($product->shelf_life_days) $outputLotData['expiration_date'] = now()->addDays((int)$product->shelf_life_days)->toDateString();
+                else throw new Exception('El producto final requiere fecha de vencimiento.');
             }
+            if ($product->requires_lot) $outputLotData['production_date'] = $outputLotData['production_date'] ?? now()->toDateString();
 
-            $outputMovement = $this->stockService->registerMovement([
-                'company_id' => $product->company_id,
-                'product_id' => $product->id,
-                'warehouse_id' => $warehouseId,
-                'type' => MovementType::ProductionOutput,
-                'quantity_base' => $targetQuantity,
-                'reference_type' => ProductionOrder::class,
-                'reference_id' => $order->id,
-                'user_id' => $userId,
-                'channel' => Channel::Web,
-                'lot_data' => $outputLotData,
+            $this->stockService->registerMovement([
+                'company_id'=>$companyId,'product_id'=>$product->id,'warehouse_id'=>$warehouse->id,'type'=>MovementType::ProductionOutput,
+                'quantity_base'=>$targetQuantity,'reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,'user_id'=>$user->id,'channel'=>Channel::Web,
+                'lot_data'=>$outputLotData,
             ]);
-
-            // Guardar registro de la salida real
-            $order->output()->create([
-                'lot_code' => $outputLotData['lot_code'] ?? null,
-                'expiration_date' => $outputLotData['expiration_date'] ?? null,
-                'quantity_produced' => $targetQuantity,
-            ]);
-
+            $order->output()->create(['lot_code'=>$outputLotData['lot_code'] ?? null,'expiration_date'=>$outputLotData['expiration_date'] ?? null,'quantity_produced'=>$targetQuantity]);
             return $order;
         });
     }

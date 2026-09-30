@@ -2,11 +2,13 @@
 
 namespace App\Livewire\Production;
 
+use App\Enums\ProductType;
 use App\Models\Product;
 use App\Services\ProductionCalculatorService;
 use App\Services\ProductionOrderService;
 use Exception;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
 use Livewire\Component;
 
@@ -15,74 +17,49 @@ class Calculator extends Component
 {
     public string $product_id = '';
     public string $target_quantity = '1';
-    
     public ?array $result = null;
     public ?string $errorMessage = null;
     public ?string $successMessage = null;
-
-    // Fields for execution
     public string $warehouse_id = '';
 
-    public function calculate(ProductionCalculatorService $calculator)
+    public function mount(): void { Gate::authorize('owner-only'); }
+
+    private function rules(): array
     {
-        $this->validate([
-            'product_id' => 'required|exists:products,id',
-            'target_quantity' => 'required|numeric|min:0.01',
-        ]);
-
-        $this->errorMessage = null;
-        $this->successMessage = null;
-        $this->result = null;
-
-        $product = Product::where('company_id', auth()->user()->company_id)->find($this->product_id);
-
-        try {
-            $this->result = $calculator->calculateRequirements($product, (float) $this->target_quantity);
-        } catch (Exception $e) {
-            $this->errorMessage = $e->getMessage();
-        }
+        $companyId = auth()->user()->company_id;
+        return [
+            'product_id'=>['required', Rule::exists('products','id')->where(fn($q)=>$q->where('company_id',$companyId)->where('type',ProductType::FinishedProduct->value)->where('status','active'))],
+            'target_quantity'=>'required|numeric|min:0.01|max:999999999',
+        ];
     }
 
-    public function confirm(ProductionOrderService $productionOrderService)
+    public function calculate(ProductionCalculatorService $calculator): void
     {
-        $this->validate([
-            'product_id' => 'required|exists:products,id',
-            'target_quantity' => 'required|numeric|min:0.01',
-        ]);
+        Gate::authorize('owner-only');
+        $this->validate($this->rules());
+        $this->errorMessage = null; $this->successMessage = null; $this->result = null;
+        $product = Product::where('company_id',auth()->user()->company_id)->where('type',ProductType::FinishedProduct)->findOrFail($this->product_id);
+        try { $this->result = $calculator->calculateRequirements($product,(float)$this->target_quantity); }
+        catch (Exception $e) { $this->errorMessage = $e->getMessage(); }
+    }
 
-        $product = Product::where('company_id', auth()->user()->company_id)->findOrFail($this->product_id);
-
+    public function confirm(ProductionOrderService $productionOrderService): void
+    {
+        Gate::authorize('owner-only');
+        $this->validate($this->rules());
+        $product = Product::where('company_id',auth()->user()->company_id)->where('type',ProductType::FinishedProduct)->findOrFail($this->product_id);
         try {
-            $result = $productionOrderService->registerProduction(
-                auth()->user(),
-                $product,
-                (float) $this->target_quantity,
-            );
-
-            $this->result = null;
-            $this->product_id = '';
-            $this->target_quantity = '1';
+            $result = $productionOrderService->registerProduction(auth()->user(),$product,(float)$this->target_quantity);
+            $this->result = null; $this->product_id = ''; $this->target_quantity = '1';
             $this->successMessage = '✅ Producción registrada. Se descontaron los insumos y se sumó el producto terminado.';
-
-            if (!empty($result['warnings'])) {
-                $this->successMessage .= "\n" . implode("\n", $result['warnings']);
-            }
-            
-        } catch (Exception $e) {
-            $this->errorMessage = $e->getMessage();
-        }
+            if (!empty($result['warnings'])) $this->successMessage .= "\n" . implode("\n",$result['warnings']);
+        } catch (Exception $e) { $this->errorMessage = $e->getMessage(); }
     }
 
     public function render()
     {
-        $products = Product::where('company_id', auth()->user()->company_id)
-            ->where('status', 'active')
-            ->whereHas('recipe')
-            ->orderBy('name')
-            ->get();
-
-        return view('livewire.production.calculator', [
-            'products' => $products,
-        ]);
+        Gate::authorize('owner-only');
+        $products = Product::where('company_id',auth()->user()->company_id)->where('status','active')->where('type',ProductType::FinishedProduct)->whereHas('recipe')->orderBy('name')->get();
+        return view('livewire.production.calculator',['products'=>$products]);
     }
 }

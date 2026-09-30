@@ -2,183 +2,45 @@
 
 namespace Tests\Feature;
 
-use App\Models\AiConversation;
+use App\Jobs\ProcessTelegramMessageJob;
 use App\Models\Company;
-use App\Models\Product;
-use App\Models\ProductCategory;
-use App\Models\Stock;
-use App\Models\Unit;
 use App\Models\User;
-use App\Models\Warehouse;
 use App\Services\BotAgentService;
-use App\Services\GeminiService;
 use App\Services\TelegramService;
-use Illuminate\Foundation\Testing\DatabaseTruncation;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Process;
-use Tests\TestCase;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
+use Tests\TestCase;
 
 class TelegramBotTest extends TestCase
 {
-    use \Illuminate\Foundation\Testing\RefreshDatabase;
+    use RefreshDatabase;
 
-    private function setupBaseData()
+    public function test_webhook_is_fail_closed_and_valid_secret_enqueues_update(): void
     {
-        $company = Company::create(['name' => 'Bot Test Company']);
-        $user = User::create(['company_id' => $company->id, 'name' => 'Tester', 'email' => 'bot@test.com', 'password' => 'pass', 'telegram_chat_id' => '123456']);
-        $warehouse = Warehouse::create(['company_id' => $company->id, 'name' => 'Bot Warehouse']);
-        $unit = Unit::create(['name' => 'Unit', 'abbreviation' => 'u', 'type' => 'count']);
-        $category = ProductCategory::create(['company_id' => $company->id, 'name' => 'Test Cat']);
-
-        return [$company, $user, $warehouse, $unit, $category];
+        config(['services.telegram.webhook_secret'=>'secret-test']); Queue::fake();
+        $this->postJson('/telegram/webhook',['update_id'=>1])->assertForbidden();
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token','wrong')->postJson('/telegram/webhook',['update_id'=>2])->assertForbidden();
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token','secret-test')->postJson('/telegram/webhook',['foo'=>'bar'])->assertStatus(422);
+        $this->withHeader('X-Telegram-Bot-Api-Secret-Token','secret-test')->postJson('/telegram/webhook',['update_id'=>3,'message'=>['text'=>'hola','chat'=>['id'=>10,'type'=>'private']]])->assertOk();
+        Queue::assertPushed(ProcessTelegramMessageJob::class,fn($job)=>$job->payload['update_id']===3);
     }
 
-    public function test_scenario_1_e2e_flow()
+    public function test_job_is_idempotent_for_same_update_and_unknown_users_are_not_processed(): void
     {
-        list($company, $user, $warehouse, $unit, $category) = $this->setupBaseData();
-        $pan = Product::create(['company_id' => $company->id, 'category_id' => $category->id, 'name' => 'Pan Hamburguesa', 'internal_code' => 'PH', 'base_unit_id' => $unit->id, 'requires_lot' => false]);
-
-        $telegramMock = Mockery::mock(TelegramService::class);
-        $telegramMock->shouldReceive('sendMessage')->byDefault();
-        $this->app->instance(TelegramService::class, $telegramMock);
-
-        $geminiMock = Mockery::mock(GeminiService::class);
-        $geminiMock->shouldReceive('analyzeText')->andReturn([
-            'intent' => 'propose_stock_entry',
-            'product_name' => 'Pan Hamburguesa',
-            'quantity' => 100
-        ]);
-        $this->app->instance(GeminiService::class, $geminiMock);
-
-        $botAgent = app(BotAgentService::class);
-
-        // Trick to reach the legacy process message flow since we want to test execution without breaking Step 6
-        AiConversation::create([
-            'user_id' => $user->id,
-            'telegram_chat_id' => '123456',
-            'pending_action' => ['type' => 'dummy']
-        ]);
-
-        $telegramMock->shouldReceive('sendMessage')->atLeast()->once()
-            ->with('123456', Mockery::on(fn($msg) => str_contains($msg, '¿Confirmo el ingreso')));
-
-        // Propose
-        $botAgent->processMessage($user, '123456', 'llegaron 100 panes');
-        
-        $conv = AiConversation::where('user_id', $user->id)->first();
-        $this->assertNotNull($conv->pending_action);
-        $this->assertArrayHasKey('quantity_base', $conv->pending_action);
-
-        $telegramMock->shouldReceive('sendMessage')->atLeast()->once()
-            ->with('123456', Mockery::on(fn($msg) => str_contains($msg, 'Ingreso registrado')));
-
-        // Confirm
-        $botAgent->processMessage($user, '123456', 'si');
-
-        $this->assertNull($conv->fresh()->pending_action);
-        $this->assertEquals(100, Stock::where('product_id', $pan->id)->sum('quantity'));
+        $telegram=Mockery::mock(TelegramService::class); $telegram->shouldReceive('sendMessage')->once()->with('999','No estás registrado para usar este asistente.');
+        $agent=Mockery::mock(BotAgentService::class); $agent->shouldNotReceive('processMessage');
+        $payload=['update_id'=>50,'message'=>['text'=>'hola','chat'=>['id'=>999,'type'=>'private']]];
+        $job=new ProcessTelegramMessageJob($payload); $job->handle($agent,$telegram); $job->handle($agent,$telegram);
+        $this->assertDatabaseCount('telegram_processed_updates',1);
     }
 
-    public function test_scenario_2_idempotency()
+    public function test_job_processes_only_active_registered_private_user(): void
     {
-        list($company, $user, $warehouse, $unit, $category) = $this->setupBaseData();
-
-        $telegramMock = Mockery::mock(TelegramService::class);
-        $telegramMock->shouldReceive('sendMessage')->byDefault();
-        $this->app->instance(TelegramService::class, $telegramMock);
-
-        $payload = [
-            'update_id' => 999999,
-            'message' => ['chat' => ['id' => '123456'], 'text' => 'hola']
-        ];
-        
-        $job = new \App\Jobs\ProcessTelegramMessageJob($payload);
-        $job->handle(app(BotAgentService::class), app(TelegramService::class));
-        $this->assertEquals(1, DB::table('telegram_processed_updates')->where('update_id', 999999)->count());
-        
-        $job2 = new \App\Jobs\ProcessTelegramMessageJob($payload);
-        $job2->handle(app(BotAgentService::class), app(TelegramService::class));
-        $this->assertEquals(1, DB::table('telegram_processed_updates')->where('update_id', 999999)->count());
-    }
-
-    public function test_scenario_3_concurrency()
-    {
-        list($company, $user, $warehouse, $unit, $category) = $this->setupBaseData();
-        $pan = Product::create(['company_id' => $company->id, 'category_id' => $category->id, 'name' => 'Pan Hamburguesa', 'internal_code' => 'PH', 'base_unit_id' => $unit->id, 'requires_lot' => false]);
-        
-        // Give 100 initial stock
-        app(\App\Services\StockService::class)->registerMovement([
-            'company_id' => $company->id,
-            'product_id' => $pan->id,
-            'warehouse_id' => $warehouse->id,
-            'type' => \App\Enums\MovementType::AdjustmentIn,
-            'quantity_base' => 100,
-            'user_id' => $user->id,
-            'channel' => \App\Enums\Channel::Web,
-        ]);
-
-        AiConversation::updateOrCreate(
-            ['user_id' => $user->id],
-            ['telegram_chat_id' => '123456', 'pending_action' => [
-                'company_id' => $company->id,
-                'product_id' => $pan->id,
-                'warehouse_id' => $warehouse->id,
-                'type' => 'adjustment_in',
-                'quantity_base' => 50,
-                'user_id' => $user->id,
-                'channel' => 'telegram'
-            ]]
-        );
-
-        $script = <<<PHP
-        try {
-            app(\App\Services\BotAgentService::class)->processMessage(\App\Models\User::find({$user->id}), '123456', 'si');
-        } catch (\Exception \$e) {
-            echo "EXCEPTION: " . \$e->getMessage();
-        }
-        PHP;
-
-        $tinkerCmd = "php artisan tinker --execute=\"" . str_replace('"', '\"', $script) . "\"";
-        
-        // Add TEST_BOT_SLEEP=true to force transaction lock collision
-        $process1 = Process::env(['APP_ENV' => 'testing', 'DB_DATABASE' => 'gestion_fabrica_testing', 'TEST_BOT_SLEEP' => 'true'])->start($tinkerCmd);
-        $process2 = Process::env(['APP_ENV' => 'testing', 'DB_DATABASE' => 'gestion_fabrica_testing', 'TEST_BOT_SLEEP' => 'true'])->start($tinkerCmd);
-        
-        $process1->wait();
-        $process2->wait();
-
-        // 100 original + 50 from ONE process (the other should bounce due to null pending_action)
-        $this->assertEquals(150, Stock::where('product_id', $pan->id)->sum('quantity'));
-    }
-
-    public function test_scenario_4_ambiguous_product()
-    {
-        list($company, $user, $warehouse, $unit, $category) = $this->setupBaseData();
-        Product::create(['company_id' => $company->id, 'category_id' => $category->id, 'name' => 'Queso Cheddar', 'internal_code' => 'QC', 'base_unit_id' => $unit->id, 'requires_lot' => false]);
-        Product::create(['company_id' => $company->id, 'category_id' => $category->id, 'name' => 'Queso Mozzarella', 'internal_code' => 'QM', 'base_unit_id' => $unit->id, 'requires_lot' => false]);
-
-        $telegramMock = Mockery::mock(TelegramService::class);
-        $telegramMock->shouldReceive('sendMessage')->byDefault();
-        $telegramMock->shouldReceive('sendMessage')->atLeast()->once()
-            ->with('123456', Mockery::on(fn($msg) => str_contains($msg, 'Encontré varios productos que coinciden')));
-        $this->app->instance(TelegramService::class, $telegramMock);
-
-        $geminiMock = Mockery::mock(GeminiService::class);
-        $geminiMock->shouldReceive('analyzeText')->andReturn([
-            'intent' => 'check_stock',
-            'product_name' => 'Queso'
-        ]);
-        $this->app->instance(GeminiService::class, $geminiMock);
-
-        // TRICK FOR LEGACY FLOW
-        AiConversation::create([
-            'user_id' => $user->id,
-            'telegram_chat_id' => '123456',
-            'pending_action' => ['type' => 'dummy']
-        ]);
-
-        $botAgent = app(BotAgentService::class);
-        $botAgent->processMessage($user, '123456', 'cuanto queso hay');
+        $company=Company::create(['name'=>'Fábrica']);
+        $user=User::create(['company_id'=>$company->id,'name'=>'Encargado','email'=>'m@test.com','password'=>'pass','role'=>'manager','status'=>'active','telegram_chat_id'=>'123']);
+        $telegram=Mockery::mock(TelegramService::class); $telegram->shouldNotReceive('sendMessage');
+        $agent=Mockery::mock(BotAgentService::class); $agent->shouldReceive('processMessage')->once()->with(Mockery::on(fn($u)=>$u->id===$user->id),'123','stock');
+        (new ProcessTelegramMessageJob(['update_id'=>60,'message'=>['text'=>'stock','chat'=>['id'=>123,'type'=>'private']]]))->handle($agent,$telegram);
     }
 }

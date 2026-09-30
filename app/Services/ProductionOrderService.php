@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\Channel;
 use App\Enums\MovementType;
+use App\Enums\ProductType;
 use App\Models\Product;
 use App\Models\ProductionOrder;
 use App\Models\ProductionOrderItem;
@@ -18,42 +19,20 @@ use InvalidArgumentException;
 
 class ProductionOrderService
 {
-    // Factory unit constants — confirmed business rules
     public const HAMBURGUESAS_PER_BANDEJA = 24;
     public const BANDEJAS_PER_CARRO = 12;
-    public const HAMBURGUESAS_PER_CARRO = self::HAMBURGUESAS_PER_BANDEJA * self::BANDEJAS_PER_CARRO; // 288
+    public const HAMBURGUESAS_PER_CARRO = self::HAMBURGUESAS_PER_BANDEJA * self::BANDEJAS_PER_CARRO;
 
     public function __construct(
         private StockService $stockService,
         private ProductionCalculatorService $calculatorService,
     ) {}
 
-    /**
-     * Convert carros/bandejas to hamburguesa units.
-     * Examples:
-     *   toHamburguesas(3, 0)   → 864
-     *   toHamburguesas(3, 2)   → 912
-     *   toHamburguesas(3.5, 0) → 1008 (3 carros y medio = 3×288 + 6×24)
-     */
     public static function toHamburguesas(float $carros = 0, float $bandejas = 0): float
     {
         return ($carros * self::HAMBURGUESAS_PER_CARRO) + ($bandejas * self::HAMBURGUESAS_PER_BANDEJA);
     }
 
-    /**
-     * Register a completed production run.
-     *
-     * Stock NEGATIVE is allowed by design (user decision). If any ingredient
-     * falls below zero, a warning is returned but the operation is NOT blocked.
-     *
-     * @param User    $user
-     * @param Product $finishedProduct
-     * @param float   $quantity         Actual number of units produced
-     * @param array   $actualConsumptions  Optional. [product_id => qty_base, ...].
-     *                If empty, theoretical quantities from the recipe are used.
-     * @param Channel $channel
-     * @return array  ['order' => ProductionOrder, 'warnings' => string[]]
-     */
     public function registerProduction(
         User $user,
         Product $finishedProduct,
@@ -61,175 +40,174 @@ class ProductionOrderService
         array $actualConsumptions = [],
         Channel $channel = Channel::Web,
     ): array {
-        if ($quantity <= 0) {
-            throw new InvalidArgumentException("La cantidad producida debe ser mayor a 0.");
+        if (!is_finite($quantity) || $quantity <= 0) {
+            throw new InvalidArgumentException('La cantidad producida debe ser mayor a 0.');
+        }
+        if (!$user->isActive() || !$user->isOwner()) {
+            throw new InvalidArgumentException('No tenés permiso para registrar producción.');
         }
 
-        $warnings = [];
-
-        return DB::transaction(function () use ($user, $finishedProduct, $quantity, $actualConsumptions, $channel, &$warnings) {
+        return DB::transaction(function () use ($user, $finishedProduct, $quantity, $actualConsumptions, $channel) {
             $companyId = $user->company_id;
-
-            $warehouse = Warehouse::where('company_id', $companyId)->firstOrFail();
-
-            // 1. Load recipe and calculate theoretical requirements
-            $recipe = $finishedProduct->recipe()->with('items.product')->first();
-            if (!$recipe) {
-                throw new Exception("El producto '{$finishedProduct->name}' no tiene una receta configurada.");
+            $user = User::where('company_id', $companyId)->whereKey($user->id)->lockForUpdate()->firstOrFail();
+            $finishedProduct = Product::where('company_id', $companyId)->whereKey($finishedProduct->id)->lockForUpdate()->firstOrFail();
+            if ($finishedProduct->type !== ProductType::FinishedProduct) {
+                throw new InvalidArgumentException('El producto seleccionado no es un producto final.');
+            }
+            if ($finishedProduct->requires_expiration && !$finishedProduct->shelf_life_days) {
+                throw new InvalidArgumentException('El producto final requiere vencimiento pero no tiene días de vida útil configurados.');
             }
 
-            $multiplier = $quantity / $recipe->yield_quantity;
+            $warehouse = Warehouse::where('company_id', $companyId)->orderBy('id')->firstOrFail();
+            $recipe = $finishedProduct->recipe()->with('items.product')->first();
+            if (!$recipe || (float) $recipe->yield_quantity <= 0 || $recipe->items->isEmpty()) {
+                throw new Exception("El producto '{$finishedProduct->name}' no tiene una receta válida configurada.");
+            }
 
-            // 2. Build consumption map: use actual if provided, otherwise theoretical
-            // NOTE: When user informs real consumptions, we use them verbatim
-            // and do NOT overwrite with theoretical values.
-            $consumptionMap = []; // product_id => qty_base to consume
+            foreach ($recipe->items as $item) {
+                if (!$item->product || $item->product->company_id !== $companyId) {
+                    throw new InvalidArgumentException('La receta contiene un insumo de otra empresa o inexistente.');
+                }
+            }
 
-            if (!empty($actualConsumptions)) {
+            $multiplier = $quantity / (float) $recipe->yield_quantity;
+            $consumptionMap = [];
+            if ($actualConsumptions) {
                 foreach ($actualConsumptions as $productId => $qtyBase) {
-                    $consumptionMap[(int) $productId] = (float) $qtyBase;
+                    $productId = (int) $productId;
+                    $qtyBase = (float) $qtyBase;
+                    if ($productId <= 0 || !is_finite($qtyBase) || $qtyBase < 0) {
+                        throw new InvalidArgumentException('Los consumos reales informados no son válidos.');
+                    }
+                    if ($qtyBase == 0) continue;
+                    if (!Product::where('company_id', $companyId)->whereKey($productId)->exists()) {
+                        throw new InvalidArgumentException('Se informó un consumo de un producto que no pertenece a la empresa activa.');
+                    }
+                    $consumptionMap[$productId] = $qtyBase;
                 }
             } else {
                 foreach ($recipe->items as $item) {
-                    $consumptionMap[$item->product_id] = $item->quantity_base * $multiplier;
+                    $consumptionMap[$item->product_id] = (float) $item->quantity_base * $multiplier;
                 }
             }
 
-            // 3. Create production order record
             $order = ProductionOrder::create([
-                'company_id' => $companyId,
-                'product_id' => $finishedProduct->id,
-                'warehouse_id' => $warehouse->id,
-                'target_quantity' => $quantity,
-                'status' => 'completed',
-                'user_id' => $user->id,
+                'company_id'=>$companyId,'product_id'=>$finishedProduct->id,'warehouse_id'=>$warehouse->id,
+                'target_quantity'=>$quantity,'status'=>'completed','user_id'=>$user->id,
             ]);
 
-            // 4. Record order items (theoretical required vs actually consumed)
             foreach ($recipe->items as $item) {
-                $required = $item->quantity_base * $multiplier;
-                $consumed = $consumptionMap[$item->product_id] ?? $required;
+                $required = (float) $item->quantity_base * $multiplier;
                 ProductionOrderItem::create([
-                    'production_order_id' => $order->id,
-                    'product_id' => $item->product_id,
-                    'required_quantity' => $required,
-                    'consumed_quantity' => $consumed,
+                    'production_order_id'=>$order->id,'product_id'=>$item->product_id,'required_quantity'=>$required,
+                    'consumed_quantity'=>$consumptionMap[$item->product_id] ?? 0,
                 ]);
             }
 
-            // 5. Deduct ingredient stock — ALLOW NEGATIVES
-            // Each ingredient's consumption is deducted individually.
+            $warnings = [];
             foreach ($consumptionMap as $productId => $qtyBase) {
-                if ($qtyBase <= 0) {
+                if ($qtyBase <= 0) continue;
+                $ingredient = Product::where('company_id', $companyId)->whereKey($productId)->firstOrFail();
+                if ($ingredient->requires_lot) {
+                    $this->deductLotControlled($ingredient, $warehouse->id, $qtyBase, $user->id, $channel, $order, $finishedProduct, $quantity);
                     continue;
                 }
 
-                $ingredient = Product::find($productId);
-                if (!$ingredient) {
-                    continue;
-                }
-
-                // Try normal deduction first
                 try {
                     $this->stockService->registerMovement([
-                        'company_id' => $companyId,
-                        'product_id' => $productId,
-                        'warehouse_id' => $warehouse->id,
-                        'type' => MovementType::ProductionConsumption,
-                        'quantity_base' => $qtyBase,
-                        'user_id' => $user->id,
-                        'channel' => $channel,
-                        'reason' => 'Producción: ' . $finishedProduct->name . ' × ' . $quantity,
-                        'reference_type' => 'production_orders',
-                        'reference_id' => $order->id,
+                        'company_id'=>$companyId,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,
+                        'type'=>MovementType::ProductionConsumption,'quantity_base'=>$qtyBase,'user_id'=>$user->id,'channel'=>$channel,
+                        'reason'=>'Producción: '.$finishedProduct->name.' × '.$quantity,
+                        'reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,
                     ]);
-                } catch (Exception $e) {
-                    // StockService threw because stock would go negative.
-                    // We ALLOW this — force-deduct and record a warning.
-                    $this->forceDeductStock(
-                        $companyId, $productId, $warehouse->id,
-                        $qtyBase, $user->id, $channel,
-                        $order->id, $finishedProduct->name, $quantity,
-                        $warnings, $ingredient->name
-                    );
+                } catch (Exception) {
+                    $this->forceDeductStock($companyId,$ingredient->id,$warehouse->id,$qtyBase,$user->id,$channel,$order->id,$finishedProduct->name,$quantity,$warnings,$ingredient->name);
                 }
             }
 
-            // 6. Record production output and add finished product stock
+            $lotData = [];
+            $lotCode = null;
+            $expirationDate = null;
+            if ($finishedProduct->requires_lot) {
+                $lotCode = 'PROD-'.now()->format('Ymd').'-'.$order->id;
+                $expirationDate = $finishedProduct->requires_expiration
+                    ? now()->addDays((int) $finishedProduct->shelf_life_days)->toDateString()
+                    : null;
+                $lotData = ['lot_code'=>$lotCode,'production_date'=>now()->toDateString(),'expiration_date'=>$expirationDate];
+            }
+
             ProductionOutput::create([
-                'production_order_id' => $order->id,
-                'quantity_produced' => $quantity,
+                'production_order_id'=>$order->id,'lot_code'=>$lotCode,'expiration_date'=>$expirationDate,'quantity_produced'=>$quantity,
             ]);
 
             $this->stockService->registerMovement([
-                'company_id' => $companyId,
-                'product_id' => $finishedProduct->id,
-                'warehouse_id' => $warehouse->id,
-                'type' => MovementType::ProductionOutput,
-                'quantity_base' => $quantity,
-                'user_id' => $user->id,
-                'channel' => $channel,
-                'reason' => 'Producción registrada',
-                'reference_type' => 'production_orders',
-                'reference_id' => $order->id,
+                'company_id'=>$companyId,'product_id'=>$finishedProduct->id,'warehouse_id'=>$warehouse->id,
+                'type'=>MovementType::ProductionOutput,'quantity_base'=>$quantity,'user_id'=>$user->id,'channel'=>$channel,
+                'reason'=>'Producción registrada','reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,'lot_data'=>$lotData,
             ]);
 
-            return ['order' => $order, 'warnings' => $warnings];
+            return ['order'=>$order,'warnings'=>$warnings];
         });
     }
 
-    /**
-     * Force a stock deduction even when it results in negative stock.
-     * Bypasses StockService's negativity guard by writing directly.
-     * Adds a warning to the caller's $warnings array.
-     */
-    private function forceDeductStock(
-        int $companyId, int $productId, int $warehouseId,
-        float $qtyBase, int $userId, Channel $channel,
-        int $orderId, string $finishedName, float $finishedQty,
-        array &$warnings, string $ingredientName
+    private function deductLotControlled(
+        Product $ingredient, int $warehouseId, float $quantity, int $userId, Channel $channel,
+        ProductionOrder $order, Product $finishedProduct, float $finishedQty
     ): void {
-        $stock = Stock::where([
-            'company_id' => $companyId,
-            'product_id' => $productId,
-            'warehouse_id' => $warehouseId,
-            'lot_id' => null,
-        ])->lockForUpdate()->first();
+        $pending = $quantity;
+        $stocks = Stock::query()
+            ->where('stock.company_id', $ingredient->company_id)
+            ->where('stock.product_id', $ingredient->id)
+            ->where('stock.warehouse_id', $warehouseId)
+            ->whereNotNull('stock.lot_id')
+            ->where('stock.quantity', '>', 0)
+            ->join('stock_lots', 'stock.lot_id', '=', 'stock_lots.id')
+            ->orderByRaw('stock_lots.expiration_date IS NULL ASC')
+            ->orderBy('stock_lots.expiration_date')
+            ->orderBy('stock_lots.entry_date')
+            ->select('stock.*')
+            ->lockForUpdate()
+            ->get();
 
-        $currentQty = $stock ? (float) $stock->quantity : 0.0;
-        $newQty = $currentQty - $qtyBase;
-
-        if ($stock) {
-            $stock->update(['quantity' => $newQty]);
-        } else {
-            Stock::create([
-                'company_id' => $companyId,
-                'product_id' => $productId,
-                'warehouse_id' => $warehouseId,
-                'lot_id' => null,
-                'quantity' => $newQty,
+        foreach ($stocks as $stock) {
+            if ($pending <= 0.000001) break;
+            $take = min($pending, (float) $stock->quantity);
+            if ($take <= 0) continue;
+            $this->stockService->registerMovement([
+                'company_id'=>$ingredient->company_id,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouseId,
+                'lot_id'=>$stock->lot_id,'type'=>MovementType::ProductionConsumption,'quantity_base'=>$take,
+                'user_id'=>$userId,'channel'=>$channel,'reason'=>'Producción: '.$finishedProduct->name.' × '.$finishedQty,
+                'reference_type'=>ProductionOrder::class,'reference_id'=>$order->id,
             ]);
+            $pending -= $take;
         }
 
-        // Insert the movement record with explicit negative sign
-        StockMovement::create([
-            'company_id' => $companyId,
-            'product_id' => $productId,
-            'warehouse_id' => $warehouseId,
-            'type' => MovementType::ProductionConsumption,
-            'quantity_base' => -abs($qtyBase),
-            'user_id' => $userId,
-            'channel' => $channel,
-            'reason' => 'Producción (stock negativo permitido): ' . $finishedName . ' × ' . $finishedQty,
-            'reference_type' => 'production_orders',
-            'reference_id' => $orderId,
-            'created_at' => now(),
-        ]);
+        if ($pending > 0.000001) {
+            throw new Exception("No alcanza el stock loteado de {$ingredient->name}. Faltan {$pending} unidades y no se permite crear stock negativo sin identificar lote.");
+        }
+    }
 
-        $warnings[] = sprintf(
-            '⚠️ %s quedó en %s unidades. Revisá el inventario.',
-            $ingredientName,
-            number_format($newQty, 0)
-        );
+    private function forceDeductStock(
+        int $companyId, int $productId, int $warehouseId, float $qtyBase, int $userId, Channel $channel,
+        int $orderId, string $finishedName, float $finishedQty, array &$warnings, string $ingredientName
+    ): void {
+        $product = Product::where('company_id',$companyId)->whereKey($productId)->firstOrFail();
+        if ($product->requires_lot) throw new InvalidArgumentException('No se puede forzar stock negativo en un producto controlado por lote.');
+        if (!Warehouse::where('company_id',$companyId)->whereKey($warehouseId)->exists()) throw new InvalidArgumentException('Depósito inválido.');
+        if (!User::where('company_id',$companyId)->whereKey($userId)->exists()) throw new InvalidArgumentException('Usuario inválido.');
+
+        $stock = Stock::where('company_id',$companyId)->where('product_id',$productId)->where('warehouse_id',$warehouseId)->whereNull('lot_id')->lockForUpdate()->first();
+        $currentQty = $stock ? (float)$stock->quantity : 0.0;
+        $newQty = $currentQty - $qtyBase;
+        if ($stock) $stock->update(['quantity'=>$newQty]);
+        else Stock::create(['company_id'=>$companyId,'product_id'=>$productId,'warehouse_id'=>$warehouseId,'lot_id'=>null,'quantity'=>$newQty]);
+
+        StockMovement::create([
+            'company_id'=>$companyId,'product_id'=>$productId,'warehouse_id'=>$warehouseId,'type'=>MovementType::ProductionConsumption,
+            'quantity_base'=>-abs($qtyBase),'user_id'=>$userId,'channel'=>$channel,
+            'reason'=>'Producción (stock negativo permitido): '.$finishedName.' × '.$finishedQty,
+            'reference_type'=>ProductionOrder::class,'reference_id'=>$orderId,'created_at'=>now(),
+        ]);
+        $warnings[] = sprintf('⚠️ %s quedó en %s unidades. Revisá el inventario.', $ingredientName, number_format($newQty, 0));
     }
 }

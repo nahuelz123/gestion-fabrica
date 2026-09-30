@@ -4,262 +4,65 @@ namespace Tests\Feature;
 
 use App\Services\GeminiService;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Http\Client\Request;
 use Tests\TestCase;
 
 class GeminiServiceTest extends TestCase
 {
-    private GeminiService $service;
-
     protected function setUp(): void
     {
         parent::setUp();
-        config(['services.gemini.api_key' => 'fake-key']);
-        $this->service = app(GeminiService::class);
+        config(['services.gemini.api_key'=>'test-key','services.gemini.model'=>'gemini-primary','services.gemini.fallback_model'=>null]);
     }
 
-    private function mockGeminiResponse(array $data)
+    private function ok(array $payload): array
     {
-        Http::fake([
-            'generativelanguage.googleapis.com/*' => Http::response([
-                'candidates' => [
-                    [
-                        'content' => [
-                            'parts' => [
-                                ['text' => json_encode($data)]
-                            ]
-                        ]
-                    ]
-                ]
-            ], 200)
-        ]);
+        return ['choices'=>[['message'=>['content'=>json_encode($payload,JSON_UNESCAPED_UNICODE)]]]];
     }
 
-    // 1. create_product incompleto
-    public function test_create_product_incomplete()
+    public function test_parses_structured_action_and_sends_context(): void
     {
-        $this->mockGeminiResponse([
-            'intent' => 'create_product',
-            'reply' => 'Perfecto. ¿Cuál es la presentación?',
-            'entities' => ['name' => 'Papel manteca'],
-            'action' => null,
-            'missing' => ['presentation'],
-            'requires_confirmation' => false,
-            'confidence' => 0.98
-        ]);
-
-        $result = $this->service->analyzeConversation('Quiero agregar papel manteca');
-
-        $this->assertEquals('create_product', $result['intent']);
-        $this->assertEquals(['presentation'], $result['missing']);
-        $this->assertNull($result['action']);
-    }
-
-    // 2. create_product completo
-    public function test_create_product_complete_requires_confirmation()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'create_product',
-            'reply' => 'Voy a crear Papel manteca, paquete de 1000. ¿Confirmás?',
-            'entities' => ['name' => 'Papel manteca', 'presentation' => 'paquete de 1000'],
-            'action' => null,
-            'missing' => [],
-            'requires_confirmation' => true,
-            'confidence' => 0.99
-        ]);
-
-        $result = $this->service->analyzeConversation('paquete de 1000', [
-            'intent' => 'create_product',
-            'entities' => ['name' => 'Papel manteca']
-        ]);
-
-        $this->assertEquals('create_product', $result['intent']);
-        $this->assertTrue($result['requires_confirmation']);
-        $this->assertEmpty($result['missing']);
-    }
-
-    // 3. corrección de presentation
-    public function test_correction_updates_entities()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'create_product',
-            'reply' => 'Voy a corregir a paquete de 500. ¿Confirmás?',
-            'entities' => ['name' => 'Papel manteca', 'presentation' => 'paquete de 500'],
-            'action' => null,
-            'missing' => [],
-            'requires_confirmation' => true,
-            'confidence' => 0.99
-        ]);
-
-        $result = $this->service->analyzeConversation('me equivoqué, era paquete de 500');
-
-        $this->assertEquals('paquete de 500', $result['entities']['presentation']);
-    }
-
-    // 4. get_stock
-    public function test_get_stock()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'get_stock',
-            'reply' => 'Consultando stock...',
-            'entities' => ['name' => 'Papel manteca'],
-            'action' => ['name' => 'get_stock', 'arguments' => ['product_name' => 'Papel manteca']],
-            'missing' => [],
-            'requires_confirmation' => false,
-            'confidence' => 0.95
-        ]);
-
-        $result = $this->service->analyzeConversation('¿cuánto papel manteca tenemos?');
-        $this->assertEquals('get_stock', $result['intent']);
-        $this->assertNotNull($result['action']);
-        $this->assertEquals('get_stock', $result['action']['name']);
-        $this->assertEquals('Papel manteca', $result['action']['arguments']['product_name']);
-    }
-
-    public function test_register_production_with_actual_consumptions()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'register_production',
-            'reply' => 'Registrando producción...',
-            'action' => [
-                'name' => 'register_production',
-                'arguments' => [
-                    'product_name' => 'Hamburguesa cheddar',
-                    'quantity' => 100,
-                    'actual_consumptions' => [
-                        ['product_name' => 'Pan', 'quantity' => 100, 'presentation_name' => 'unidad']
-                    ]
-                ]
-            ],
-            'requires_confirmation' => true,
-            'confidence' => 0.99
-        ]);
-
-        $result = $this->service->analyzeConversation('usamos 100 panes para 100 hamburguesas');
-        $this->assertEquals('register_production', $result['intent']);
-        $this->assertIsArray($result['action']['arguments']['actual_consumptions']);
-        $this->assertEquals('Pan', $result['action']['arguments']['actual_consumptions'][0]['product_name']);
-    }
-
-    public function test_set_stock_with_items()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'set_stock',
-            'reply' => 'Actualizando stock múltiple...',
-            'action' => [
-                'name' => 'set_stock',
-                'arguments' => [
-                    'items' => [
-                        ['product_name' => 'Harina', 'quantity' => 10, 'presentation_name' => 'bolsa'],
-                        ['product_name' => 'Sal', 'quantity' => 5, 'presentation_name' => 'paquete']
-                    ]
-                ]
-            ],
-            'requires_confirmation' => true,
-            'confidence' => 0.99
-        ]);
-
-        $result = $this->service->analyzeConversation('hay 10 bolsas de harina y 5 de sal');
-        $this->assertEquals('set_stock', $result['intent']);
-        $this->assertCount(2, $result['action']['arguments']['items']);
-        $this->assertEquals('Harina', $result['action']['arguments']['items'][0]['product_name']);
-    }
-
-    // 5. check_production
-    public function test_check_production()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'check_production',
-            'reply' => 'Verificando si podemos producir 500 unidades...',
-            'entities' => ['name' => 'Pan', 'quantity' => 500],
-            'action' => ['name' => 'check_production', 'arguments' => ['product_name' => 'Pan', 'quantity' => 500]],
-            'missing' => [],
-            'requires_confirmation' => false,
-            'confidence' => 0.99
-        ]);
-
-        $result = $this->service->analyzeConversation('¿podemos hacer 500 panes?');
-        $this->assertEquals('check_production', $result['intent']);
-    }
-
-    // 6. JSON inválido
-    public function test_invalid_json_returns_fallback()
-    {
-        Http::fake([
-            'generativelanguage.googleapis.com/*' => Http::response([
-                'candidates' => [
-                    [
-                        'content' => [
-                            'parts' => [
-                                ['text' => 'Esto no es JSON {[']
-                            ]
-                        ]
-                    ]
-                ]
-            ], 200)
-        ]);
-
-        $result = $this->service->analyzeConversation('Hola');
-        $this->assertEquals('unknown', $result['intent']);
-    }
-
-    // 7. intent desconocido
-    public function test_unknown_intent_is_preserved_or_fallback()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'un_intent_inventado',
-            'reply' => 'Algo inventado',
-        ]);
-
-        $result = $this->service->analyzeConversation('Hola');
-        // Debe ser forzado a unknown por validateAndFormatResponse
-        $this->assertEquals('unknown', $result['intent']);
-    }
-
-    // 8. action inexistente/no permitida
-    public function test_unauthorized_action_is_normalized_to_null()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'create_product',
-            'reply' => 'Borrando base de datos',
-            'action' => [
-                'name' => 'delete_database',
-                'arguments' => []
-            ]
-        ]);
-
-        $result = $this->service->analyzeConversation('borra la bd');
-        $this->assertEquals('create_product', $result['intent']);
-        $this->assertNull($result['action']); // Invalid action name was stripped
-    }
-
-    // 9. preservación del contexto recibido
-    public function test_context_is_sent_in_prompt()
-    {
-        $this->mockGeminiResponse([
-            'intent' => 'unknown',
-            'reply' => 'test'
-        ]);
-
-        $context = ['history' => ['msg1']];
-        $this->service->analyzeConversation('hello', $context);
-
-        Http::assertSent(function (Request $request) {
-            $body = $request->data();
-            $prompt = $body['contents'][0]['parts'][0]['text'];
-            return str_contains($prompt, 'hello') && str_contains($prompt, 'msg1');
+        Http::fake(['*'=>Http::response($this->ok(['intent'=>'add_stock','reply'=>'Voy a sumar','entities'=>[],'action'=>['name'=>'add_stock','arguments'=>['product_name'=>'Papel','quantity'=>10]],'missing'=>[],'requires_confirmation'=>true,'confidence'=>0.99]),200)]);
+        $result=app(GeminiService::class)->analyzeConversation('sumá 10 papel',['last_product_name'=>'Papel']);
+        $this->assertSame('add_stock',$result['intent']); $this->assertSame('add_stock',$result['action']['name']); $this->assertTrue($result['requires_confirmation']);
+        Http::assertSent(function ($request) {
+            $body=$request->data();
+            return $body['model']==='gemini-primary' && str_contains($body['messages'][1]['content'],'last_product_name');
         });
     }
 
-    // 10. error HTTP/API
-    public function test_api_error_returns_fallback_safely()
+    public function test_invalid_action_is_not_executable(): void
     {
-        Http::fake([
-            'generativelanguage.googleapis.com/*' => Http::response('Server error', 500)
-        ]);
+        Http::fake(['*'=>Http::response($this->ok(['intent'=>'unknown','reply'=>'No','entities'=>[],'action'=>['name'=>'drop_database','arguments'=>[]],'missing'=>[],'requires_confirmation'=>false,'confidence'=>0.1]),200)]);
+        $result=app(GeminiService::class)->analyzeConversation('hacé algo peligroso');
+        $this->assertNull($result['action']); $this->assertSame('unknown',$result['intent']);
+    }
 
-        $result = $this->service->analyzeConversation('Hola');
-        $this->assertEquals('unknown', $result['intent']);
-        $this->assertStringContainsString('Tuve un problema procesando eso', $result['reply']);
+    public function test_429_returns_quota_message_without_transient_retries(): void
+    {
+        Http::fake(['*'=>Http::response(['error'=>['details'=>[['retryDelay'=>'3.2s']]]],429)]);
+        $result=app(GeminiService::class)->analyzeConversation('hola');
+        $this->assertStringContainsString('4 segundos',$result['reply']);
+        Http::assertSentCount(1);
+    }
+
+    public function test_503_retries_primary_then_optional_fallback(): void
+    {
+        config(['services.gemini.fallback_model'=>'gemini-fallback']);
+        Http::fake(['*'=>Http::sequence()
+            ->push(['error'=>'busy'],503)
+            ->push(['error'=>'busy'],503)
+            ->push(['error'=>'busy'],503)
+            ->push($this->ok(['intent'=>'get_stock','reply'=>'ok','entities'=>[],'action'=>['name'=>'get_stock','arguments'=>['product_name'=>'all']],'missing'=>[],'requires_confirmation'=>false,'confidence'=>1]),200)]);
+        $result=app(GeminiService::class)->analyzeConversation('stock');
+        $this->assertSame('get_stock',$result['intent']); Http::assertSentCount(4);
+        $models=collect(Http::recorded())->map(fn($pair)=>$pair[0]->data()['model'] ?? null)->values()->all();
+        $this->assertSame(['gemini-primary','gemini-primary','gemini-primary','gemini-fallback'],$models);
+    }
+
+    public function test_invalid_json_falls_back_safely(): void
+    {
+        Http::fake(['*'=>Http::response(['choices'=>[['message'=>['content'=>'not-json']]]],200)]);
+        $result=app(GeminiService::class)->analyzeConversation('hola');
+        $this->assertSame('unknown',$result['intent']); $this->assertNull($result['action']);
     }
 }

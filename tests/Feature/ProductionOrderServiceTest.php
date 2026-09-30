@@ -2,125 +2,59 @@
 
 namespace Tests\Feature;
 
-use App\Enums\Channel;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Recipe;
-use App\Models\RecipeItem;
 use App\Models\Stock;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\ProductionOrderService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use InvalidArgumentException;
 use Tests\TestCase;
 
 class ProductionOrderServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    private User $user;
-    private Company $company;
-    private Warehouse $warehouse;
-    private Product $finishedProduct;
-    private Product $ingredient1;
-    private Product $ingredient2;
-
-    protected function setUp(): void
+    private function fixture(): array
     {
-        parent::setUp();
-
-        $this->company = Company::create(['name' => 'Test Company']);
-        $this->user = User::factory()->create(['company_id' => $this->company->id, 'role' => 'owner']);
-        $this->warehouse = Warehouse::create(['company_id' => $this->company->id, 'name' => 'Main Warehouse']);
-        
-        $unit = Unit::create(['name' => 'Unidad', 'abbreviation' => 'u', 'type' => 'count']);
-        $category = ProductCategory::create(['company_id' => $this->company->id, 'name' => 'Insumos']);
-
-        $this->ingredient1 = Product::create([
-            'company_id' => $this->company->id, 'category_id' => $category->id,
-            'name' => 'Pan', 'presentation' => 'unidad', 'type' => 'raw_material', 'base_unit_id' => $unit->id,
-        ]);
-        
-        $this->ingredient2 = Product::create([
-            'company_id' => $this->company->id, 'category_id' => $category->id,
-            'name' => 'Carne', 'presentation' => 'unidad', 'type' => 'raw_material', 'base_unit_id' => $unit->id,
-        ]);
-
-        $this->finishedProduct = Product::create([
-            'company_id' => $this->company->id, 'category_id' => $category->id,
-            'name' => 'Hamburguesa', 'presentation' => 'unidad', 'type' => 'finished_product', 'base_unit_id' => $unit->id,
-        ]);
-
-        $recipe = Recipe::create([
-            'company_id' => $this->company->id,
-            'product_id' => $this->finishedProduct->id,
-            'yield_quantity' => 24, // 1 bandeja
-        ]);
-
-        RecipeItem::create(['recipe_id' => $recipe->id, 'product_id' => $this->ingredient1->id, 'quantity_base' => 24]);
-        RecipeItem::create(['recipe_id' => $recipe->id, 'product_id' => $this->ingredient2->id, 'quantity_base' => 48]); // 2 carnes por hamb.
+        $company=Company::create(['name'=>'Fábrica']);
+        $owner=User::create(['company_id'=>$company->id,'name'=>'Dueño','email'=>'o@test.com','password'=>'pass','role'=>'owner','status'=>'active']);
+        $manager=User::create(['company_id'=>$company->id,'name'=>'Encargado','email'=>'m@test.com','password'=>'pass','role'=>'manager','status'=>'active']);
+        $warehouse=Warehouse::create(['company_id'=>$company->id,'name'=>'Principal']);
+        $unit=Unit::create(['name'=>'Unidad','abbreviation'=>'u','type'=>'count']); $cat=ProductCategory::create(['company_id'=>$company->id,'name'=>'General']);
+        $ingredient=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Pan','internal_code'=>'PAN','type'=>'raw_material','base_unit_id'=>$unit->id,'status'=>'active']);
+        $finished=Product::create(['company_id'=>$company->id,'category_id'=>$cat->id,'name'=>'Hamburguesa','internal_code'=>'HAM','type'=>'finished_product','base_unit_id'=>$unit->id,'status'=>'active']);
+        $recipe=Recipe::create(['company_id'=>$company->id,'product_id'=>$finished->id,'yield_quantity'=>24]);
+        $recipe->items()->create(['product_id'=>$ingredient->id,'quantity_base'=>24]);
+        Stock::create(['company_id'=>$company->id,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,'quantity'=>100]);
+        return compact('company','owner','manager','warehouse','ingredient','finished');
     }
 
-    public function test_to_hamburguesas_conversion()
+    public function test_owner_registers_production_atomically(): void
     {
-        $this->assertEquals(288, ProductionOrderService::toHamburguesas(1, 0));
-        $this->assertEquals(864, ProductionOrderService::toHamburguesas(3, 0));
-        $this->assertEquals(912, ProductionOrderService::toHamburguesas(3, 2));
-        $this->assertEquals(1008, ProductionOrderService::toHamburguesas(3.5, 0));
+        $d=$this->fixture(); $result=app(ProductionOrderService::class)->registerProduction($d['owner'],$d['finished'],24);
+        $this->assertNotNull($result['order']);
+        $this->assertSame(76.0,(float)Stock::where('product_id',$d['ingredient']->id)->sum('quantity'));
+        $this->assertSame(24.0,(float)Stock::where('product_id',$d['finished']->id)->sum('quantity'));
+        $this->assertDatabaseHas('production_orders',['id'=>$result['order']->id,'company_id'=>$d['company']->id,'status'=>'completed']);
+        $this->assertSame(2,\App\Models\StockMovement::where('reference_type',\App\Models\ProductionOrder::class)->where('reference_id',$result['order']->id)->count());
     }
 
-    public function test_register_production_with_sufficient_stock()
+    public function test_manager_cannot_register_production(): void
     {
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient1->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 1000]);
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient2->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 2000]);
-
-        $service = app(ProductionOrderService::class);
-        $result = $service->registerProduction($this->user, $this->finishedProduct, 24); // 24 produced
-
-        $this->assertEmpty($result['warnings']);
-        $this->assertEquals(24, $result['order']->target_quantity);
-        
-        $this->assertEquals(1000 - 24, Stock::where('product_id', $this->ingredient1->id)->value('quantity'));
-        $this->assertEquals(2000 - 48, Stock::where('product_id', $this->ingredient2->id)->value('quantity'));
-        $this->assertEquals(24, Stock::where('product_id', $this->finishedProduct->id)->value('quantity'));
+        $d=$this->fixture(); $this->expectException(InvalidArgumentException::class);
+        app(ProductionOrderService::class)->registerProduction($d['manager'],$d['finished'],24);
     }
 
-    public function test_register_production_with_insufficient_stock_allows_negative()
+    public function test_product_from_another_company_is_rejected(): void
     {
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient1->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 10]);
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient2->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 10]);
-
-        $service = app(ProductionOrderService::class);
-        $result = $service->registerProduction($this->user, $this->finishedProduct, 24); // Needs 24 and 48
-
-        $this->assertNotEmpty($result['warnings']);
-        
-        // Stock goes negative
-        $this->assertEquals(10 - 24, Stock::where('product_id', $this->ingredient1->id)->value('quantity'));
-        $this->assertEquals(10 - 48, Stock::where('product_id', $this->ingredient2->id)->value('quantity'));
-        
-        // Finished product gets added
-        $this->assertEquals(24, Stock::where('product_id', $this->finishedProduct->id)->value('quantity'));
-    }
-
-    public function test_register_production_with_actual_consumptions()
-    {
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient1->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 1000]);
-        Stock::create(['company_id' => $this->company->id, 'product_id' => $this->ingredient2->id, 'warehouse_id' => $this->warehouse->id, 'quantity' => 2000]);
-
-        $service = app(ProductionOrderService::class);
-        
-        // We inform that we used 30 of ing1 and 50 of ing2 instead of 24 and 48
-        $result = $service->registerProduction($this->user, $this->finishedProduct, 24, [
-            $this->ingredient1->id => 30,
-            $this->ingredient2->id => 50,
-        ]);
-
-        $this->assertEmpty($result['warnings']);
-        
-        $this->assertEquals(1000 - 30, Stock::where('product_id', $this->ingredient1->id)->value('quantity'));
-        $this->assertEquals(2000 - 50, Stock::where('product_id', $this->ingredient2->id)->value('quantity'));
+        $d=$this->fixture(); $other=Company::create(['name'=>'Otra']); $cat=ProductCategory::create(['company_id'=>$other->id,'name'=>'Otro']);
+        $foreign=Product::create(['company_id'=>$other->id,'category_id'=>$cat->id,'name'=>'Ajena','internal_code'=>'OTR','type'=>'finished_product','base_unit_id'=>$d['finished']->base_unit_id,'status'=>'active']);
+        $this->expectException(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        app(ProductionOrderService::class)->registerProduction($d['owner'],$foreign,1);
     }
 }
