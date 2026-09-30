@@ -27,4 +27,8 @@ return [
         'redirect_uri' => env('MERCADOPAGO_REDIRECT_URI'),
         'webhook_secret' => env('MERCADOPAGO_WEBHOOK_SECRET'),
     ],
+    'geocoding' => [
+        'endpoint' => env('GEOCODING_ENDPOINT', 'https://nominatim.openstreetmap.org/search'),
+        'user_agent' => env('GEOCODING_USER_AGENT', 'RapiBurguer/1.0 (' . env('APP_URL', 'http://localhost') . ')'),
+    ],
 ];
