@@ -16,7 +16,7 @@
             <form wire:submit="calculate" class="space-y-5">
                 <div>
                     <label class="block text-sm font-medium text-gray-700">¿Qué hicieron?</label>
-                    <select wire:model="product_id" class="mt-1 block w-full rounded-lg border-gray-300 text-base px-3 py-3 border">
+                    <select wire:model="product_id" class="mt-1 block w-full rounded-lg border-gray-300 text-base px-3 py-3 border focus:border-red-500 focus:ring-red-500">
                         <option value="">Elegir producto...</option>
                         @foreach($products as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach
                     </select>
@@ -28,11 +28,11 @@
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <span class="text-xs text-gray-500">Carros</span>
-                            <input wire:model="carros" type="number" step="0.01" min="0" placeholder="0" class="mt-1 block w-full rounded-lg border-gray-300 text-lg px-4 py-3 border">
+                            <input wire:model="carros" type="number" step="0.01" min="0" placeholder="0" class="mt-1 block w-full rounded-lg border-gray-300 text-lg px-4 py-3 border focus:border-red-500 focus:ring-red-500">
                         </div>
                         <div>
                             <span class="text-xs text-gray-500">Bandejas extra</span>
-                            <input wire:model="bandejas" type="number" step="0.01" min="0" placeholder="0" class="mt-1 block w-full rounded-lg border-gray-300 text-lg px-4 py-3 border">
+                            <input wire:model="bandejas" type="number" step="0.01" min="0" placeholder="0" class="mt-1 block w-full rounded-lg border-gray-300 text-lg px-4 py-3 border focus:border-red-500 focus:ring-red-500">
                         </div>
                     </div>
                     <p class="text-xs text-gray-400 mt-2">1 carro = 12 bandejas = 288 hamburguesas · 1 bandeja = 24.</p>
@@ -43,12 +43,12 @@
                 <details class="text-sm">
                     <summary class="cursor-pointer text-gray-500">Quiero cargar unidades directamente</summary>
                     <div class="mt-3">
-                        <input wire:model="target_quantity" type="number" step="0.01" min="0.01" class="block w-full rounded-lg border-gray-300 px-4 py-3 border" placeholder="Unidades">
+                        <input wire:model="target_quantity" type="number" step="0.01" min="0.01" class="block w-full rounded-lg border-gray-300 px-4 py-3 border focus:border-red-500 focus:ring-red-500" placeholder="Unidades">
                         <p class="text-xs text-gray-400 mt-1">Usalo sólo si no vas a cargar carros ni bandejas.</p>
                     </div>
                 </details>
 
-                <button type="submit" wire:loading.attr="disabled" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-3 rounded-lg font-semibold">Comprobar</button>
+                <button type="submit" wire:loading.attr="disabled" class="w-full bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-3 rounded-lg font-semibold">Comprobar</button>
             </form>
         </div>
 
@@ -98,7 +98,7 @@
                                     <div>
                                         <label class="block text-xs font-medium text-gray-600">{{ $item['ingredient']->name }}</label>
                                         <div class="mt-1 flex">
-                                            <input wire:model="actual_consumptions.{{ $item['ingredient']->id }}" type="number" step="0.0001" min="0" class="block w-full rounded-l-lg border-gray-300 px-3 py-2 border">
+                                            <input wire:model="actual_consumptions.{{ $item['ingredient']->id }}" type="number" step="0.0001" min="0" class="block w-full rounded-l-lg border-gray-300 px-3 py-2 border focus:border-red-500 focus:ring-red-500">
                                             <span class="inline-flex items-center px-3 rounded-r-lg border border-l-0 bg-gray-50 text-gray-500 text-sm">{{ $unit }}</span>
                                         </div>
                                     </div>
@@ -110,9 +110,9 @@
                     </div>
                 @endif
             @else
-                <div class="bg-gray-50 border border-dashed rounded-xl p-12 text-center text-gray-400">
+                <div class="bg-yellow-50 border border-yellow-200 border-dashed rounded-xl p-12 text-center text-gray-500">
                     <div class="text-4xl mb-3">🏭</div>
-                    <p class="font-medium">Cargá el producto y la cantidad.</p>
+                    <p class="font-medium text-gray-800">Cargá el producto y la cantidad.</p>
                     <p class="text-sm mt-1">Te digo enseguida si alcanza el stock.</p>
                 </div>
             @endif
