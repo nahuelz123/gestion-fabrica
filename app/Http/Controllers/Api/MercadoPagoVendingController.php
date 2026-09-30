@@ -21,11 +21,15 @@ class MercadoPagoVendingController extends Controller
         $state = Str::random(48);
         $verifier = Str::random(96);
         $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $returnTo = in_array($request->query('return'), ['machine', 'partners', 'machines'], true)
+            ? (string) $request->query('return')
+            : 'partners';
 
         session([
             'mp_oauth_state' => $state,
             'mp_oauth_partner_id' => $partner->id,
             'mp_oauth_code_verifier' => $verifier,
+            'mp_oauth_return' => $returnTo,
         ]);
 
         return redirect()->away($service->authorizationUrl($state, $challenge));
@@ -35,7 +39,10 @@ class MercadoPagoVendingController extends Controller
     {
         abort_unless(auth()->user()?->isOwner(), 403);
 
+        $returnTo = (string) session()->get('mp_oauth_return', 'partners');
+
         if ($request->filled('error')) {
+            session()->forget('mp_oauth_return');
             return redirect()->route('vending.partners.index')
                 ->with('error', 'Mercado Pago no autorizó la vinculación: ' . (string) $request->query('error_description', $request->query('error')));
         }
@@ -44,6 +51,7 @@ class MercadoPagoVendingController extends Controller
         $expected = (string) session()->pull('mp_oauth_state', '');
         $partnerId = session()->pull('mp_oauth_partner_id');
         $verifier = (string) session()->pull('mp_oauth_code_verifier', '');
+        $returnTo = (string) session()->pull('mp_oauth_return', $returnTo);
 
         abort_if($state === '' || $expected === '' || !hash_equals($expected, $state), 403, 'Estado OAuth inválido.');
         abort_if(!$partnerId || !$request->filled('code') || $verifier === '', 422, 'Faltan datos para completar la vinculación.');
@@ -66,8 +74,18 @@ class MercadoPagoVendingController extends Controller
             }
         } catch (Throwable $e) {
             report($e);
-            return redirect()->route('vending.partners.edit', $partner->id)
+            return redirect()->route('vending.partners.edit', ['id' => $partner->id])
                 ->with('error', $e->getMessage());
+        }
+
+        if ($returnTo === 'machine') {
+            return redirect()->route('vending.machines.create', ['partner' => $partner->id])
+                ->with('message', "Mercado Pago quedó vinculado a {$partner->name}. Ahora terminá de cargar la máquina.");
+        }
+
+        if ($returnTo === 'machines') {
+            return redirect()->route('vending.index')
+                ->with('message', "Mercado Pago quedó vinculado a {$partner->name}. Ya podés sincronizar la máquina.");
         }
 
         return redirect()->route('vending.partners.index')
@@ -114,9 +132,6 @@ class MercadoPagoVendingController extends Controller
         $signature = (string) $request->header('x-signature', '');
         $requestId = (string) $request->header('x-request-id', '');
 
-        // Algunos stacks PHP normalizan los puntos de los parámetros de query
-        // (data.id -> data_id). Aceptamos ambas variantes y, como último recurso,
-        // el data.id del body. El valor sigue usándose únicamente para validar HMAC.
         $dataId = (string) (
             $request->query->get('data.id')
             ?? $request->query->get('data_id')
