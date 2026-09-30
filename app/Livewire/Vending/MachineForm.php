@@ -68,9 +68,12 @@ class MachineForm extends Component
             ? VendingMachine::where('company_id', $companyId)->with('partner')->findOrFail($this->machineId)
             : new VendingMachine();
 
+        $partnerChanged = $machine->exists
+            && (int) $machine->vending_partner_id !== (int) $this->vending_partner_id;
+
         $forceOrder = !$machine->exists
             || (float) $machine->sale_price !== (float) $this->sale_price
-            || (int) $machine->vending_partner_id !== (int) $this->vending_partner_id
+            || $partnerChanged
             || (int) $machine->product_id !== (int) $this->product_id;
 
         if ($machine->exists && $forceOrder && $machine->partner?->hasMercadoPagoConnection()) {
@@ -87,8 +90,14 @@ class MachineForm extends Component
             $machine->code = $this->generateCode($companyId);
             $machine->name = 'Máquina ' . $partner->name;
             $machine->status = 'active';
-        } elseif ((int) $machine->vending_partner_id !== (int) $partner->id) {
+        } elseif ($partnerChanged) {
             $machine->name = 'Máquina ' . $partner->name;
+            $machine->mercadopago_pos_id = null;
+            $machine->mercadopago_external_pos_id = null;
+            $machine->mercadopago_qr_image_url = null;
+            $machine->mercadopago_qr_template_image_url = null;
+            $machine->mercadopago_qr_code = null;
+            $machine->last_provisioned_at = null;
         }
 
         $machine->fill([
