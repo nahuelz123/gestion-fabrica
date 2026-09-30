@@ -43,7 +43,7 @@ class ProductionOrderService
         if (!is_finite($quantity) || $quantity <= 0) {
             throw new InvalidArgumentException('La cantidad producida debe ser mayor a 0.');
         }
-        if (!$user->isActive() || !$user->isOwner()) {
+        if (!$user->isActive() || !$user->canManageProduction()) {
             throw new InvalidArgumentException('No tenés permiso para registrar producción.');
         }
 
@@ -71,24 +71,27 @@ class ProductionOrderService
             }
 
             $multiplier = $quantity / (float) $recipe->yield_quantity;
+
+            // Partimos siempre de los consumos teóricos de la receta. Si el encargado
+            // informa consumos reales, sólo reemplazamos los ingredientes indicados.
+            // Así una corrección parcial no hace que otros insumos queden en consumo 0.
             $consumptionMap = [];
-            if ($actualConsumptions) {
-                foreach ($actualConsumptions as $productId => $qtyBase) {
-                    $productId = (int) $productId;
-                    $qtyBase = (float) $qtyBase;
-                    if ($productId <= 0 || !is_finite($qtyBase) || $qtyBase < 0) {
-                        throw new InvalidArgumentException('Los consumos reales informados no son válidos.');
-                    }
-                    if ($qtyBase == 0) continue;
-                    if (!Product::where('company_id', $companyId)->whereKey($productId)->exists()) {
-                        throw new InvalidArgumentException('Se informó un consumo de un producto que no pertenece a la empresa activa.');
-                    }
-                    $consumptionMap[$productId] = $qtyBase;
+            $recipeProductIds = [];
+            foreach ($recipe->items as $item) {
+                $recipeProductIds[(int) $item->product_id] = true;
+                $consumptionMap[(int) $item->product_id] = (float) $item->quantity_base * $multiplier;
+            }
+
+            foreach ($actualConsumptions as $productId => $qtyBase) {
+                $productId = (int) $productId;
+                $qtyBase = (float) $qtyBase;
+                if ($productId <= 0 || !is_finite($qtyBase) || $qtyBase < 0) {
+                    throw new InvalidArgumentException('Los consumos reales informados no son válidos.');
                 }
-            } else {
-                foreach ($recipe->items as $item) {
-                    $consumptionMap[$item->product_id] = (float) $item->quantity_base * $multiplier;
+                if (!isset($recipeProductIds[$productId])) {
+                    throw new InvalidArgumentException('Sólo se pueden informar consumos reales de ingredientes de la receta.');
                 }
+                $consumptionMap[$productId] = $qtyBase;
             }
 
             $order = ProductionOrder::create([
