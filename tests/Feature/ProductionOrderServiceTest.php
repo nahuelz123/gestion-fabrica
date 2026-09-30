@@ -31,7 +31,7 @@ class ProductionOrderServiceTest extends TestCase
         $recipe=Recipe::create(['company_id'=>$company->id,'product_id'=>$finished->id,'yield_quantity'=>24]);
         $recipe->items()->create(['product_id'=>$ingredient->id,'quantity_base'=>24]);
         Stock::create(['company_id'=>$company->id,'product_id'=>$ingredient->id,'warehouse_id'=>$warehouse->id,'quantity'=>100]);
-        return compact('company','owner','manager','warehouse','ingredient','finished');
+        return compact('company','owner','manager','warehouse','ingredient','finished','cat','unit');
     }
 
     public function test_owner_registers_production_atomically(): void
@@ -44,10 +44,48 @@ class ProductionOrderServiceTest extends TestCase
         $this->assertSame(2,\App\Models\StockMovement::where('reference_type',\App\Models\ProductionOrder::class)->where('reference_id',$result['order']->id)->count());
     }
 
-    public function test_manager_cannot_register_production(): void
+    public function test_manager_can_register_production_with_actual_consumption(): void
     {
-        $d=$this->fixture(); $this->expectException(InvalidArgumentException::class);
-        app(ProductionOrderService::class)->registerProduction($d['manager'],$d['finished'],24);
+        $d=$this->fixture();
+        $result=app(ProductionOrderService::class)->registerProduction(
+            $d['manager'],
+            $d['finished'],
+            24,
+            [$d['ingredient']->id => 20]
+        );
+
+        $this->assertNotNull($result['order']);
+        $this->assertSame($d['manager']->id, (int) $result['order']->user_id);
+        $this->assertSame(80.0,(float)Stock::where('product_id',$d['ingredient']->id)->sum('quantity'));
+        $this->assertSame(24.0,(float)Stock::where('product_id',$d['finished']->id)->sum('quantity'));
+        $this->assertDatabaseHas('production_order_items', [
+            'production_order_id'=>$result['order']->id,
+            'product_id'=>$d['ingredient']->id,
+            'required_quantity'=>24,
+            'consumed_quantity'=>20,
+        ]);
+    }
+
+    public function test_actual_consumptions_cannot_include_products_outside_recipe(): void
+    {
+        $d=$this->fixture();
+        $otherIngredient=Product::create([
+            'company_id'=>$d['company']->id,
+            'category_id'=>$d['cat']->id,
+            'name'=>'Bolsa extra',
+            'internal_code'=>'BOL',
+            'type'=>'raw_material',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+
+        $this->expectException(InvalidArgumentException::class);
+        app(ProductionOrderService::class)->registerProduction(
+            $d['manager'],
+            $d['finished'],
+            24,
+            [$otherIngredient->id => 2]
+        );
     }
 
     public function test_product_from_another_company_is_rejected(): void
