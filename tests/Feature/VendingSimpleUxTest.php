@@ -63,6 +63,13 @@ class VendingSimpleUxTest extends TestCase
 
     public function test_linking_kiosk_resolves_written_intersection_without_device_gps(): void
     {
+        config([
+            'services.mercadopago.client_id' => 'client-test',
+            'services.mercadopago.client_secret' => 'secret-test',
+            'services.mercadopago.redirect_uri' => 'https://example.test/mercadopago/oauth/callback',
+            'services.mercadopago.webhook_secret' => 'webhook-test',
+        ]);
+
         Cache::flush();
         Http::fake(function (Request $request) {
             if (str_contains($request->url(), 'nominatim.openstreetmap.org/search')) {
@@ -111,6 +118,37 @@ class VendingSimpleUxTest extends TestCase
             ->assertSee('Dirección o esquina')
             ->assertSee('No usamos la ubicación actual de tu teléfono.')
             ->assertDontSee('navigator.geolocation', false);
+    }
+
+    public function test_missing_global_mercadopago_config_is_explained_without_500(): void
+    {
+        config([
+            'services.mercadopago.client_id' => null,
+            'services.mercadopago.client_secret' => null,
+            'services.mercadopago.redirect_uri' => null,
+            'services.mercadopago.webhook_secret' => null,
+        ]);
+
+        $partner = VendingPartner::create([
+            'company_id' => $this->company->id,
+            'name' => 'Kiosco Sin MP',
+            'address' => 'Belgrano e Independencia, Mar del Plata, Buenos Aires',
+            'city_name' => 'Mar del Plata',
+            'state_name' => 'Buenos Aires',
+            'commission_percent' => 0,
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($this->owner)
+            ->get(route('vending.mercadopago.connect', ['partner' => $partner->id]))
+            ->assertRedirect(route('vending.partners.edit', ['id' => $partner->id, 'return' => 'partners']))
+            ->assertSessionHas('error');
+
+        $this->actingAs($this->owner)
+            ->get(route('vending.partners.edit', $partner->id))
+            ->assertOk()
+            ->assertSee('Falta la configuración general de Mercado Pago')
+            ->assertSee('Mercado Pago pendiente de configuración');
     }
 
     public function test_new_machine_only_needs_kiosk_product_and_price(): void
