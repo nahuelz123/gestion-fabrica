@@ -32,11 +32,19 @@
         </div>
 
         @if(!$partner || !$partner->hasMercadoPagoConnection())
-            <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-5">
-                <div class="font-semibold text-gray-900">Vincular Mercado Pago</div>
-                <p class="text-sm text-gray-600 mt-1">Se hace una sola vez. La app ubica el kiosco a partir de la dirección o esquina que escribiste y después abre Mercado Pago para autorizar la cuenta del kiosco.</p>
-                <p class="text-xs text-gray-500 mt-3">La ubicación técnica se obtiene en el servidor con datos de <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" class="underline">OpenStreetMap</a>; nunca se pide el GPS de este dispositivo.</p>
-            </div>
+            @if($mercadoPagoConfigured)
+                <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-5">
+                    <div class="font-semibold text-gray-900">Vincular Mercado Pago</div>
+                    <p class="text-sm text-gray-600 mt-1">Se hace una sola vez por kiosco. Después de guardar, el dueño del kiosco entra a su Mercado Pago y autoriza la vinculación.</p>
+                    <p class="text-xs text-gray-500 mt-3">La app obtiene la ubicación a partir de la dirección o esquina escrita; nunca usa el GPS de este dispositivo.</p>
+                </div>
+            @else
+                <div class="bg-amber-50 border border-amber-300 rounded-2xl p-5">
+                    <div class="font-semibold text-amber-900">⚠️ Falta la configuración general de Mercado Pago</div>
+                    <p class="text-sm text-amber-800 mt-2">Esto se configura una sola vez para Rapi Burguer, no en cada kiosco. Podés guardar el kiosco ahora, pero la vinculación de cuentas queda deshabilitada hasta completar esa configuración en el servidor.</p>
+                    <p class="text-xs text-amber-700 mt-3">El dueño del kiosco nunca tiene que cargar Client ID, Client Secret ni otras credenciales técnicas.</p>
+                </div>
+            @endif
         @else
             <div class="bg-green-50 border border-green-200 rounded-xl p-4 text-sm text-green-800">✅ Mercado Pago vinculado.</div>
         @endif
@@ -45,11 +53,18 @@
             <a href="{{ $returnToMachine ? route('vending.machines.create') : route('vending.partners.index') }}" wire:navigate class="px-5 py-3 border rounded-lg text-center">Cancelar</a>
 
             @if(!$partner || !$partner->hasMercadoPagoConnection())
-                <button type="submit" class="px-5 py-3 bg-white border rounded-lg font-medium" wire:loading.attr="disabled">Guardar sin vincular</button>
-                <button type="button" wire:click="saveAndConnect" wire:loading.attr="disabled" wire:target="saveAndConnect" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold disabled:opacity-50">
-                    <span wire:loading.remove wire:target="saveAndConnect">Guardar y vincular Mercado Pago</span>
-                    <span wire:loading wire:target="saveAndConnect">Buscando ubicación…</span>
-                </button>
+                <button type="submit" class="px-5 py-3 bg-white border rounded-lg font-medium" wire:loading.attr="disabled">Guardar kiosco</button>
+
+                @if($mercadoPagoConfigured)
+                    <button type="button" wire:click="saveAndConnect" wire:loading.attr="disabled" wire:target="saveAndConnect" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold disabled:opacity-50">
+                        <span wire:loading.remove wire:target="saveAndConnect">Guardar y vincular Mercado Pago</span>
+                        <span wire:loading wire:target="saveAndConnect">Preparando vinculación…</span>
+                    </button>
+                @else
+                    <button type="button" disabled class="px-6 py-3 bg-gray-200 text-gray-500 rounded-lg font-semibold cursor-not-allowed">
+                        Mercado Pago pendiente de configuración
+                    </button>
+                @endif
             @else
                 <button type="submit" class="px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold" wire:loading.attr="disabled">Guardar cambios</button>
             @endif
