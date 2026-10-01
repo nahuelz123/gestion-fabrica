@@ -18,12 +18,18 @@ class MercadoPagoVendingController extends Controller
         abort_unless(auth()->user()?->isOwner(), 403);
         abort_unless($partner->company_id === auth()->user()->company_id, 404);
 
-        $state = Str::random(48);
-        $verifier = Str::random(96);
-        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
         $returnTo = in_array($request->query('return'), ['machine', 'partners', 'machines'], true)
             ? (string) $request->query('return')
             : 'partners';
+
+        if (!$this->mercadoPagoIntegrationReady()) {
+            return redirect()->route('vending.partners.edit', ['id' => $partner->id, 'return' => $returnTo])
+                ->with('error', 'Mercado Pago todavía no está configurado a nivel general para Rapi Burguer. El kiosco quedó guardado y podrá vincularse cuando se complete esa configuración única.');
+        }
+
+        $state = Str::random(48);
+        $verifier = Str::random(96);
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
 
         session([
             'mp_oauth_state' => $state,
@@ -32,7 +38,22 @@ class MercadoPagoVendingController extends Controller
             'mp_oauth_return' => $returnTo,
         ]);
 
-        return redirect()->away($service->authorizationUrl($state, $challenge));
+        try {
+            $authorizationUrl = $service->authorizationUrl($state, $challenge);
+        } catch (Throwable $e) {
+            report($e);
+            session()->forget([
+                'mp_oauth_state',
+                'mp_oauth_partner_id',
+                'mp_oauth_code_verifier',
+                'mp_oauth_return',
+            ]);
+
+            return redirect()->route('vending.partners.edit', ['id' => $partner->id, 'return' => $returnTo])
+                ->with('error', 'No se pudo iniciar la vinculación con Mercado Pago. Revisá la configuración general de la integración.');
+        }
+
+        return redirect()->away($authorizationUrl);
     }
 
     public function callback(Request $request, MercadoPagoVendingService $service)
@@ -125,6 +146,14 @@ class MercadoPagoVendingController extends Controller
 
         ProcessMercadoPagoWebhookJob::dispatch($eventId);
         return response()->json(['status' => 'accepted'], 202);
+    }
+
+    private function mercadoPagoIntegrationReady(): bool
+    {
+        return filled(config('services.mercadopago.client_id'))
+            && filled(config('services.mercadopago.client_secret'))
+            && filled(config('services.mercadopago.redirect_uri'))
+            && filled(config('services.mercadopago.webhook_secret'));
     }
 
     private function validSignature(Request $request, string $secret): bool
