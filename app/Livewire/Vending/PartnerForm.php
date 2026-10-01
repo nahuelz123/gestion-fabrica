@@ -71,6 +71,11 @@ class PartnerForm extends Component
             ? VendingPartner::where('company_id', auth()->user()->company_id)->findOrFail($this->partnerId)
             : new VendingPartner();
 
+        $configurationMissing = $connect && !$this->mercadoPagoIntegrationReady();
+        if ($configurationMissing) {
+            $connect = false;
+        }
+
         $payload = [
             'company_id' => auth()->user()->company_id,
             'name' => trim($data['name']),
@@ -118,6 +123,16 @@ class PartnerForm extends Component
         $partner->fill($payload)->save();
         $this->partnerId = $partner->id;
 
+        if ($configurationMissing) {
+            session()->flash(
+                'error',
+                'El kiosco quedó guardado. Falta configurar una sola vez la integración general de Mercado Pago de Rapi Burguer antes de vincular cuentas de kioscos.'
+            );
+            $return = $this->returnToMachine ? 'machine' : ($this->returnToMachines ? 'machines' : 'partners');
+            $this->redirect(route('vending.partners.edit', ['id' => $partner->id, 'return' => $return]), navigate: true);
+            return;
+        }
+
         if ($connect) {
             $return = $this->returnToMachine ? 'machine' : ($this->returnToMachines ? 'machines' : 'partners');
             $this->redirect(route('vending.mercadopago.connect', ['partner' => $partner->id, 'return' => $return]), navigate: false);
@@ -150,6 +165,14 @@ class PartnerForm extends Component
         $this->redirect(route('vending.partners.index'), navigate: true);
     }
 
+    private function mercadoPagoIntegrationReady(): bool
+    {
+        return filled(config('services.mercadopago.client_id'))
+            && filled(config('services.mercadopago.client_secret'))
+            && filled(config('services.mercadopago.redirect_uri'))
+            && filled(config('services.mercadopago.webhook_secret'));
+    }
+
     private function shortAddress(VendingPartner $partner): string
     {
         if ($partner->address) {
@@ -169,7 +192,8 @@ class PartnerForm extends Component
         $partner = $this->partnerId
             ? VendingPartner::where('company_id', auth()->user()->company_id)->find($this->partnerId)
             : null;
+        $mercadoPagoConfigured = $this->mercadoPagoIntegrationReady();
 
-        return view('livewire.vending.partner-form', compact('partner'));
+        return view('livewire.vending.partner-form', compact('partner', 'mercadoPagoConfigured'));
     }
 }
