@@ -21,7 +21,13 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if ($this->app->environment('production')) URL::forceScheme('https');
+        if ($this->app->environment('production')) {
+            // No exponer stack traces, rutas internas ni configuración sensible aunque
+            // APP_DEBUG haya quedado habilitado por error en el proveedor de hosting.
+            config(['app.debug' => false]);
+            URL::forceScheme('https');
+        }
+
         Gate::define('manage-users', fn (User $user) => $user->isOwner());
         Gate::define('owner-only', fn (User $user) => $user->isOwner());
         Gate::define('manage-stock', fn (User $user) => $user->canManageStock());
