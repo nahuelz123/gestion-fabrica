@@ -12,6 +12,7 @@ use App\Models\Stock;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Warehouse;
+use App\Services\BotActionExecutor;
 use App\Services\BotActionPreviewService;
 use App\Services\ProductService;
 use App\Services\ProductionOrderService;
@@ -55,11 +56,76 @@ class RapiBurguerStockPresentationTest extends TestCase
             ],
         ]);
 
-        $this->assertStringContainsString('60 caja de 60 = 3600 u', $preview);
-        $this->assertStringContainsString('48 caja de 36 = 1728 u', $preview);
-        $this->assertStringContainsString('10 barra de 200 = 2000 u', $preview);
-        $this->assertStringContainsString('4 barra de 240 = 960 u', $preview);
-        $this->assertStringContainsString('5 barra de 200 = 1000 u', $preview);
+        $this->assertStringContainsString('60 cajas = 3600 u', $preview);
+        $this->assertStringContainsString('48 cajas = 1728 u', $preview);
+        $this->assertStringContainsString('10 barras = 2000 u', $preview);
+        $this->assertStringContainsString('4 barras = 960 u', $preview);
+        $this->assertStringContainsString('5 barras = 1000 u', $preview);
+    }
+
+    public function test_exact_telegram_stock_message_resolves_aliases_and_updates_every_quantity_atomically(): void
+    {
+        [$company, $user, $warehouse, $category, $unit] = $this->baseData();
+
+        $medallon = $this->product($company->id, $category->id, $unit->id, 'Medallón');
+        $pan = $this->product($company->id, $category->id, $unit->id, 'Pan');
+        $cheddar = $this->product($company->id, $category->id, $unit->id, 'Chedar');
+        $jamon = $this->product($company->id, $category->id, $unit->id, 'Jamón');
+        $queso = $this->product($company->id, $category->id, $unit->id, 'Queso');
+        $bacon = $this->product($company->id, $category->id, $unit->id, 'Bacon');
+        $lomito = $this->product($company->id, $category->id, $unit->id, 'Lomito');
+        $bolsitas = $this->product($company->id, $category->id, $unit->id, 'Bolsitas');
+        $papel = $this->product($company->id, $category->id, $unit->id, 'Papel manteca');
+
+        (require database_path('migrations/2026_10_02_083000_apply_rapi_burguer_stock_presentations.php'))->up();
+        (require database_path('migrations/2026_10_02_090000_finalize_rapi_burguer_material_presentations.php'))->up();
+        (require database_path('migrations/2026_10_02_113500_add_rapi_burguer_product_aliases.php'))->up();
+
+        $action = [
+            'name' => 'add_stock',
+            'arguments' => [
+                'items' => [
+                    ['product_name' => 'medallón de carne', 'quantity' => 60, 'presentation_name' => 'cajas'],
+                    ['product_name' => 'pan', 'quantity' => 48, 'presentation_name' => 'cajas'],
+                    ['product_name' => 'queso cheddar', 'quantity' => 10, 'presentation_name' => 'barras'],
+                    ['product_name' => 'jamón', 'quantity' => 4, 'presentation_name' => 'barra'],
+                    ['product_name' => 'queso', 'quantity' => 5, 'presentation_name' => 'barra'],
+                    ['product_name' => 'bacon', 'quantity' => 15, 'presentation_name' => 'piezas'],
+                    ['product_name' => 'lomito', 'quantity' => 10, 'presentation_name' => 'pieza'],
+                    ['product_name' => 'bolsitas', 'quantity' => 2000],
+                    ['product_name' => 'papel manteca', 'quantity' => 1000, 'presentation_name' => 'unidad'],
+                ],
+            ],
+        ];
+
+        $preview = app(BotActionPreviewService::class)->preview($user, $action);
+        $this->assertStringContainsString('Chedar: 10 barras = 2000 u', $preview);
+        $this->assertStringContainsString('Jamón: 4 barras = 960 u', $preview);
+        $this->assertStringContainsString('Queso: 5 barras = 1000 u', $preview);
+
+        $result = app(BotActionExecutor::class)->execute($user, 'chat-test', $action, []);
+        $this->assertTrue($result['success'], $result['message']);
+
+        $expected = [
+            $medallon->id => 3600.0,
+            $pan->id => 1728.0,
+            $cheddar->id => 2000.0,
+            $jamon->id => 960.0,
+            $queso->id => 1000.0,
+            $bacon->id => 15.0,
+            $lomito->id => 10.0,
+            $bolsitas->id => 2000.0,
+            $papel->id => 1000.0,
+        ];
+
+        foreach ($expected as $productId => $quantity) {
+            $this->assertSame(
+                $quantity,
+                (float) Stock::where('company_id', $company->id)->where('product_id', $productId)->sum('quantity')
+            );
+        }
+
+        $this->assertSame(9, \App\Models\StockMovement::where('company_id', $company->id)->count());
     }
 
     public function test_partial_bar_remainder_stays_available_for_next_production(): void
