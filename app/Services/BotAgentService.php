@@ -121,7 +121,87 @@ class BotAgentService
             $current=is_array($args['hypothetical_stock_additions'] ?? null) ? $args['hypothetical_stock_additions'] : [];
             if ($previous && $current) $args['hypothetical_stock_additions']=array_values(array_merge($previous,$current));
         }
+        if (in_array($name,['add_stock','register_stock','adjust_stock'],true) && !empty($args['items']) && is_array($args['items'])) {
+            $args['items']=$this->inferStockPresentationsFromText($args['items'],$textNorm);
+        }
+
         $action['arguments']=array_filter($args,fn($value)=>$value!==null); return $action;
+    }
+
+    /**
+     * Refuerza una debilidad típica del lenguaje natural: en frases como
+     * "10 barras de cheddar, 4 de jamón y 5 de queso", la unidad se expresa
+     * una sola vez. Conservamos esa unidad para los elementos coordinados,
+     * pero sólo cuando el siguiente número aparece como "N de ...".
+     */
+    private function inferStockPresentationsFromText(array $items,string $text): array
+    {
+        $cursor=0; $lastPresentation=null;
+        $unitPattern='cajas?|barras?|piezas?|paquetes?|bolsas?|unidades?|fetas?';
+
+        foreach ($items as $index=>$item) {
+            if (!is_array($item) || !isset($item['quantity'])) continue;
+
+            $quantity=(float)$item['quantity'];
+            if ($quantity <= 0) continue;
+
+            $quantityPattern=preg_quote($this->plainNumber($quantity),'/');
+            $remaining=mb_substr($text,$cursor);
+
+            if (!preg_match('/\\b'.$quantityPattern.'\\b(?:\\s+(?<unit>'.$unitPattern.'))?(?<de>\\s+de\\b)?/iu',$remaining,$match,PREG_OFFSET_CAPTURE)) {
+                continue;
+            }
+
+            $full=$match[0][0] ?? '';
+            $offset=(int)($match[0][1] ?? 0);
+            $cursor += $offset + mb_strlen($full);
+
+            $unit=isset($match['unit'][0]) ? trim((string)$match['unit'][0]) : '';
+            $hasDe=isset($match['de'][0]) && trim((string)$match['de'][0]) !== '';
+
+            if ($unit !== '') {
+                $lastPresentation=$this->singularPresentationWord($unit);
+                if (empty($item['presentation_name'])) {
+                    $items[$index]['presentation_name']=$lastPresentation;
+                }
+                continue;
+            }
+
+            if (empty($item['presentation_name']) && $hasDe && $lastPresentation) {
+                $items[$index]['presentation_name']=$lastPresentation;
+            } elseif (!$hasDe) {
+                // "2000 bolsitas" empieza una nueva expresión y no debe heredar
+                // "pieza" de "10 de lomito".
+                $lastPresentation=null;
+            }
+
+            if (!empty($item['presentation_name'])) {
+                $lastPresentation=$this->singularPresentationWord((string)$item['presentation_name']);
+            }
+        }
+
+        return $items;
+    }
+
+    private function singularPresentationWord(string $value): string
+    {
+        $value=mb_strtolower(trim($value));
+        return match (true) {
+            str_starts_with($value,'caja') => 'caja',
+            str_starts_with($value,'barra') => 'barra',
+            str_starts_with($value,'pieza') => 'pieza',
+            str_starts_with($value,'paquete') => 'paquete',
+            str_starts_with($value,'bolsa') => 'bolsa',
+            str_starts_with($value,'feta') => 'feta',
+            default => 'unidad',
+        };
+    }
+
+    private function plainNumber(float $value): string
+    {
+        return abs($value-round($value)) < 0.00001
+            ? (string)(int)round($value)
+            : rtrim(rtrim(number_format($value,2,'.',''),'0'),'.');
     }
 
     private function rememberUsefulReferences(array &$context,array $action): void
