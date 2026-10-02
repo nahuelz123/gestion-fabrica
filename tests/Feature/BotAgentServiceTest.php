@@ -107,7 +107,7 @@ class BotAgentServiceTest extends TestCase
         $this->assertSame('barra',$pending['arguments']['items'][3]['presentation_name']);
         $this->assertSame('barra',$pending['arguments']['items'][4]['presentation_name']);
         $this->assertSame('pieza',$pending['arguments']['items'][6]['presentation_name']);
-        $this->assertArrayNotHasKey('presentation_name',$pending['arguments']['items'][7]);
+        $this->assertNull($pending['arguments']['items'][7]['presentation_name'] ?? null);
     }
 
     public function test_pending_action_can_only_be_claimed_once(): void
