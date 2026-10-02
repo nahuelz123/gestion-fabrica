@@ -87,6 +87,70 @@ class BotActionExecutorTest extends TestCase
         $this->assertDatabaseHas('production_orders',['company_id'=>$d['a']->id,'product_id'=>$finished->id,'user_id'=>$d['manager']->id,'target_quantity'=>288]);
     }
 
+    public function test_production_check_prefers_finished_product_and_converts_carts_to_units(): void
+    {
+        $d=$this->data();
+
+        // Raw Bacon exists and used to steal the fuzzy match from the finished product.
+        Product::create([
+            'company_id'=>$d['a']->id,
+            'category_id'=>$d['ca']->id,
+            'name'=>'Bacon',
+            'internal_code'=>'BACON-RAW',
+            'type'=>'raw_material',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+
+        $finished=Product::create([
+            'company_id'=>$d['a']->id,
+            'category_id'=>$d['ca']->id,
+            'name'=>'Hamburguesa bacon',
+            'internal_code'=>'HB',
+            'type'=>'finished_product',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+
+        $recipe=Recipe::create([
+            'company_id'=>$d['a']->id,
+            'product_id'=>$finished->id,
+            'yield_quantity'=>288,
+        ]);
+        $recipe->items()->create([
+            'product_id'=>$d['pa']->id,
+            'quantity_base'=>288,
+        ]);
+
+        Stock::create([
+            'company_id'=>$d['a']->id,
+            'product_id'=>$d['pa']->id,
+            'warehouse_id'=>$d['wa']->id,
+            'quantity'=>1000,
+        ]);
+
+        $result=app(BotActionExecutor::class)->execute(
+            $d['manager'],
+            '112',
+            [
+                'name'=>'check_production',
+                'arguments'=>[
+                    'product_name'=>'bacon',
+                    'carros'=>3,
+                ],
+            ],
+            []
+        );
+
+        $this->assertTrue($result['success'],$result['message'] ?? 'Falló la simulación.');
+        $this->assertStringContainsString('864 u de Hamburguesa bacon',$result['message']);
+        $this->assertSame(
+            1000.0,
+            (float)Stock::where('company_id',$d['a']->id)->where('product_id',$d['pa']->id)->sum('quantity')
+        );
+        $this->assertSame(0,AppModelsProductionOrder::where('company_id',$d['a']->id)->count());
+    }
+
     public function test_owner_can_create_and_update_product_with_current_schema(): void
     {
         $d=$this->data(); $executor=app(BotActionExecutor::class);
