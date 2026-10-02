@@ -106,7 +106,7 @@ class BotAgentService
     private function permissionReply(User $user): string
     {
         return $user->isManager()
-            ? 'Tu rol de encargado permite consultar y gestionar stock, pero no administrar productos, recetas, producción, compras ni otras configuraciones.'
+            ? 'Tu rol de encargado permite consultar y gestionar stock y registrar producción, pero no administrar productos, recetas, compras ni otras configuraciones.'
             : 'No tenés permiso para realizar esa operación.';
     }
 
