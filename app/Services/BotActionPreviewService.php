@@ -84,7 +84,7 @@ class BotActionPreviewService
                 [$baseQuantity, $presentationName] = $this->convert($product, $quantity, $item['presentation_name'] ?? ($args['presentation_name'] ?? null));
 
                 $display = $presentationName
-                    ? $this->number($quantity) . " {$presentationName} = " . $this->number($baseQuantity) . ' u'
+                    ? $this->number($quantity) . ' ' . $this->displayPresentation($presentationName, $quantity) . ' = ' . $this->number($baseQuantity) . ' u'
                     : $this->number($quantity) . ' u';
                 $lines[] = "- {$productName}: {$display}";
             }
@@ -155,6 +155,23 @@ class BotActionPreviewService
             $quantity * (float) $presentation->conversion_factor,
             $presentation->name,
         ];
+    }
+
+    private function displayPresentation(string $value,float $quantity): string
+    {
+        $token=$this->presentationToken($value);
+        $plural=abs($quantity-1.0) > 0.00001;
+
+        return match($token) {
+            'caja' => $plural ? 'cajas' : 'caja',
+            'barra' => $plural ? 'barras' : 'barra',
+            'pieza' => $plural ? 'piezas' : 'pieza',
+            'paquete' => $plural ? 'paquetes' : 'paquete',
+            'bolsa' => $plural ? 'bolsas' : 'bolsa',
+            'feta' => $plural ? 'fetas' : 'feta',
+            'unidad' => $plural ? 'unidades' : 'unidad',
+            default => $value,
+        };
     }
 
     private function presentationToken(string $value): string
