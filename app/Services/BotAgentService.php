@@ -54,6 +54,8 @@ class BotAgentService
         }
 
         $analysis=$this->geminiService->analyzeConversation($text,$context);
+        $analysis=$this->repairProductionLanguage($analysis,$textNorm);
+
         if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
             $reply=$analysis['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.';
             $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
@@ -88,6 +90,117 @@ class BotAgentService
         }
         $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
         $this->telegramService->sendMessage($chatId,$reply);
+    }
+
+    /**
+     * Production is a critical factory workflow, so common phrases are repaired
+     * deterministically instead of relying exclusively on the LLM.
+     *
+     * Examples:
+     * - "quiero hacer 3 carritos de bacon" => check_production, 864 u
+     * - "hicimos 3 carros de bacon" => register_production (confirmation required)
+     */
+    private function repairProductionLanguage(array $analysis,string $text): array
+    {
+        $parsed=$this->parseProductionPhrase($text);
+        if (!$parsed) return $analysis;
+
+        $action=is_array($analysis['action'] ?? null) ? $analysis['action'] : null;
+        $existingName=is_string($action['name'] ?? null) ? $action['name'] : null;
+        $productionActions=[
+            'calculate_production','check_production','get_missing_inputs',
+            'get_max_production','register_production',
+        ];
+
+        $completed=$parsed['completed'];
+        $name=$completed
+            ? 'register_production'
+            : (in_array($existingName,$productionActions,true) && $existingName !== 'register_production'
+                ? $existingName
+                : 'check_production');
+
+        // "Quiero hacer..." is operational language: by default we answer whether
+        // the requested production is feasible, not just list ingredients.
+        if (!$completed && $parsed['planning']) {
+            $name='check_production';
+        }
+
+        $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+        $args['product_name']=$parsed['product_name'];
+
+        if ($parsed['unit']==='carro') {
+            $args['carros']=$parsed['amount'];
+            $args['quantity']=$parsed['amount'] * 288;
+        } else {
+            $args['bandejas']=$parsed['amount'];
+            $args['quantity']=$parsed['amount'] * 24;
+        }
+
+        $analysis['intent']=$name;
+        $analysis['action']=['name'=>$name,'arguments'=>$args];
+        $analysis['missing']=[];
+        $analysis['requires_confirmation']=$name==='register_production';
+        $analysis['confidence']=max((float)($analysis['confidence'] ?? 0),0.99);
+
+        return $analysis;
+    }
+
+    private function parseProductionPhrase(string $text): ?array
+    {
+        $normalized=trim(mb_strtolower($text));
+        $number='(?<amount>\\d+(?:[\\.,]\\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)';
+        $unit='(?<unit>carritos?|carros?|bandejas?)';
+
+        if (!preg_match('/\\b'.$number.'\\s+'.$unit.'\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
+            return null;
+        }
+
+        $amount=$this->spanishNumber((string)$match['amount']);
+        if ($amount <= 0) return null;
+
+        $product=trim((string)$match['product']);
+        // Closing-production details belong to actual_consumptions and must not
+        // become part of the product name.
+        $product=preg_split('/\\s+y\\s+(?:usamos|gastamos|consumimos|qued[oó]|sobr[oó])\\b/iu',$product,2)[0] ?? $product;
+        $product=trim($product," \t\n\r\0\x0B.,;:!?");
+        if ($product==='') return null;
+
+        $completed=(bool)preg_match('/\\b(hicimos|terminamos|producimos|fabricamos|salieron|salio|salió)\\b/iu',$normalized);
+        $planning=(bool)preg_match('/\\b(quiero|queremos|vamos|necesito|necesitamos|podemos|puedo|hacer|producir|alcanza|alcanzan)\\b/iu',$normalized);
+
+        $unitToken=str_starts_with(mb_strtolower((string)$match['unit']),'bandeja')
+            ? 'bandeja'
+            : 'carro';
+
+        return [
+            'amount'=>$amount,
+            'unit'=>$unitToken,
+            'product_name'=>$product,
+            'completed'=>$completed,
+            'planning'=>$planning,
+        ];
+    }
+
+    private function spanishNumber(string $value): float
+    {
+        $value=str_replace(',','.',mb_strtolower(trim($value)));
+        if (is_numeric($value)) return (float)$value;
+
+        return match($value) {
+            'un','una','uno' => 1.0,
+            'dos' => 2.0,
+            'tres' => 3.0,
+            'cuatro' => 4.0,
+            'cinco' => 5.0,
+            'seis' => 6.0,
+            'siete' => 7.0,
+            'ocho' => 8.0,
+            'nueve' => 9.0,
+            'diez' => 10.0,
+            'once' => 11.0,
+            'doce' => 12.0,
+            default => 0.0,
+        };
     }
 
     private function claimPendingAction(AiConversation $conversation): ?array
