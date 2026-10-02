@@ -636,10 +636,8 @@ class BotActionExecutor
     /**
      * Resolve base quantity from a physical presentation quantity.
      * E.g. "3 barras" of cheddar (factor=200) → 600 base units.
-     * If presentation_name is null or not found, treats quantity as base units.
-     *
-     * NOTE: For bacon/lomito/queso/jamón, conversion factors are currently
-     * unconfirmed (seeder placeholder values). This is documented intentionally.
+     * Bacon y lomito se cuentan por pieza y admiten fracciones (7.5 piezas).
+     * Si presentation_name no existe, la cantidad ya se considera unidad base.
      */
     private function formatNumber(float $value): string
     {
@@ -654,14 +652,6 @@ class BotActionExecutor
     private function resolveBaseQuantity(Product $product, float $quantity, ?string $presentationName): float
     {
         if ($presentationName) {
-            // Block unconfirmed conversions
-            $unconfirmedNames = ['Bacon', 'Lomito', 'Queso', 'Jamón', 'Cheddar'];
-            foreach ($unconfirmedNames as $name) {
-                if (stripos($product->name, $name) !== false && (stripos($presentationName, 'barra') !== false || stripos($presentationName, 'pieza') !== false)) {
-                    throw new Exception("No puedo convertir '{$presentationName}' a unidades base para {$product->name} porque el rendimiento real todavía no está confirmado en el sistema. Por favor, indicá la cantidad en unidades (fetas).");
-                }
-            }
-
             $pres = $product->presentations()
                 ->where('name', 'like', "%{$presentationName}%")
                 ->first();
