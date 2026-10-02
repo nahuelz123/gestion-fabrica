@@ -32,7 +32,30 @@ class BotActionPreviewService
             if (!empty($args['bandejas'])) $parts[] = $args['bandejas'] . ' bandeja(s)';
             if (!empty($args['quantity'])) $parts[] = $args['quantity'] . ' u';
             $qty = $parts ? implode(' + ', $parts) : 'la cantidad indicada';
-            return "Voy a registrar producción de {$product}: {$qty}. Esto descontará insumos y sumará producto terminado. ¿Confirmás?";
+
+            $lines = ["Voy a registrar producción de {$product}: {$qty}."];
+
+            $actual = is_array($args['actual_consumptions'] ?? null)
+                ? $args['actual_consumptions']
+                : [];
+
+            if ($actual) {
+                $lines[] = 'Consumos reales informados:';
+                foreach (array_slice($actual, 0, 30) as $item) {
+                    if (!is_array($item) || empty($item['product_name']) || !isset($item['quantity'])) continue;
+
+                    $quantity = (float) $item['quantity'];
+                    $presentation = trim((string) ($item['presentation_name'] ?? ''));
+                    $label = $presentation !== '' ? $presentation : 'u';
+                    $lines[] = '- ' . (string) $item['product_name'] . ': ' . $this->number($quantity) . ' ' . $label;
+                }
+                $lines[] = 'Los demás insumos se descontarán según la receta.';
+            } else {
+                $lines[] = 'Se descontarán los insumos según la receta.';
+            }
+
+            $lines[] = '¿Confirmás?';
+            return implode("\n", $lines);
         }
 
         if ($name === 'create_product') {
