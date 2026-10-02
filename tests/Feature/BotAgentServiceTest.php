@@ -56,6 +56,60 @@ class BotAgentServiceTest extends TestCase
         $this->assertNull($conversation->pending_action);
     }
 
+    public function test_stock_sentence_inherits_boxes_bars_and_pieces_without_leaking_to_loose_units(): void
+    {
+        $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
+        $telegram=Mockery::mock(TelegramService::class); $telegram->shouldReceive('sendMessage')->once();
+        $gemini=Mockery::mock(GeminiService::class); $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'add_stock','reply'=>'','entities'=>[],
+            'action'=>['name'=>'add_stock','arguments'=>['items'=>[
+                ['product_name'=>'Medallón de carne','quantity'=>60,'presentation_name'=>'cajas'],
+                ['product_name'=>'Pan','quantity'=>48,'presentation_name'=>'cajas'],
+                ['product_name'=>'queso chedar','quantity'=>10,'presentation_name'=>null],
+                ['product_name'=>'jamón','quantity'=>4,'presentation_name'=>null],
+                ['product_name'=>'queso','quantity'=>5,'presentation_name'=>null],
+                ['product_name'=>'Bacon','quantity'=>15,'presentation_name'=>'piezas'],
+                ['product_name'=>'Lomito','quantity'=>10,'presentation_name'=>null],
+                ['product_name'=>'bolsitas','quantity'=>2000,'presentation_name'=>null],
+                ['product_name'=>'papel manteca','quantity'=>1000,'presentation_name'=>'unidad'],
+            ]]],
+            'missing'=>[],'requires_confirmation'=>true,'confidence'=>1,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldReceive('preview')->once()->with($user,Mockery::on(function($action){
+            $items=$action['arguments']['items'] ?? [];
+            return ($items[0]['presentation_name'] ?? null)==='cajas'
+                && ($items[1]['presentation_name'] ?? null)==='cajas'
+                && ($items[2]['presentation_name'] ?? null)==='barra'
+                && ($items[3]['presentation_name'] ?? null)==='barra'
+                && ($items[4]['presentation_name'] ?? null)==='barra'
+                && ($items[5]['presentation_name'] ?? null)==='piezas'
+                && ($items[6]['presentation_name'] ?? null)==='pieza'
+                && empty($items[7]['presentation_name'])
+                && ($items[8]['presentation_name'] ?? null)==='unidad';
+        }))->andReturn('Confirmación');
+
+        $executor=Mockery::mock(BotActionExecutor::class); $executor->shouldNotReceive('execute');
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        app(BotAgentService::class)->processMessage(
+            $user,
+            $chat,
+            'Ayer ingresaron 60 cajas de medallón de carne, tenemos 48 cajas de pan 10 barras de queso cheddar 4 de jamón 5 de queso 15 piezas de bacon y 10 de lomito 2000 bolsitas y 1000 papel manteca'
+        );
+
+        $pending=AiConversation::where('user_id',$user->id)->firstOrFail()->pending_action;
+        $this->assertSame('barra',$pending['arguments']['items'][2]['presentation_name']);
+        $this->assertSame('barra',$pending['arguments']['items'][3]['presentation_name']);
+        $this->assertSame('barra',$pending['arguments']['items'][4]['presentation_name']);
+        $this->assertSame('pieza',$pending['arguments']['items'][6]['presentation_name']);
+        $this->assertArrayNotHasKey('presentation_name',$pending['arguments']['items'][7]);
+    }
+
     public function test_pending_action_can_only_be_claimed_once(): void
     {
         $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
