@@ -55,6 +55,7 @@ class BotAgentService
 
         $analysis=$this->geminiService->analyzeConversation($text,$context);
         $analysis=$this->repairProductionLanguage($analysis,$textNorm);
+        $analysis=$this->repairStockMutationLanguage($analysis,$textNorm);
 
         if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
             $reply=$analysis['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.';
@@ -100,6 +101,50 @@ class BotAgentService
      * - "quiero hacer 3 carritos de bacon" => check_production, 864 u
      * - "hicimos 3 carros de bacon" => register_production (confirmation required)
      */
+    /**
+     * Distinguish stock entries from stock baselines. "Ingresaron 10 cajas"
+     * adds stock; "tenemos/stock actual 10 cajas" sets the current balance.
+     * Mixed wording is intentionally rejected because guessing could corrupt
+     * inventory.
+     */
+    private function repairStockMutationLanguage(array $analysis,string $text): array
+    {
+        $action=is_array($analysis['action'] ?? null) ? $analysis['action'] : null;
+        $name=$action['name'] ?? null;
+        $stockMutations=['add_stock','register_stock','adjust_stock','set_stock'];
+
+        if (!in_array($name,$stockMutations,true)) return $analysis;
+
+        $hasAdd=(bool)preg_match('/\b(ingresaron|ingreso|ingresó|entraron|recibimos|recibi|recibí|compramos|compre|compré|sum[aá]|suma|agreg[aá]|agrega)\b/iu',$text);
+        $hasSet=(bool)preg_match('/\b(stock actual|tenemos en stock|tenemos|hay en stock|dej[aá] el stock|deja el stock|establec[eé]|stock es|stock queda)\b/iu',$text);
+
+        if ($hasAdd && $hasSet) {
+            return [
+                'intent'=>'unknown',
+                'reply'=>'Ese mensaje mezcla mercadería que ingresó con cantidades que ya tenés. Para no tocar mal el stock, decime una de estas dos cosas: “sumá estas cantidades al stock” o “establecé el stock actual en estas cantidades”.',
+                'entities'=>is_array($analysis['entities'] ?? null) ? $analysis['entities'] : [],
+                'action'=>null,
+                'missing'=>['stock_operation'],
+                'requires_confirmation'=>false,
+                'confidence'=>1.0,
+            ];
+        }
+
+        if ($hasSet) {
+            $analysis['intent']='set_stock';
+            $analysis['action']['name']='set_stock';
+            $analysis['requires_confirmation']=true;
+            $analysis['missing']=[];
+        } elseif ($hasAdd) {
+            $analysis['intent']='add_stock';
+            $analysis['action']['name']='add_stock';
+            $analysis['requires_confirmation']=true;
+            $analysis['missing']=[];
+        }
+
+        return $analysis;
+    }
+
     private function repairProductionLanguage(array $analysis,string $text): array
     {
         $parsed=$this->parseProductionPhrase($text);
