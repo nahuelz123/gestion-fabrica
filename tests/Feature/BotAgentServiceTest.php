@@ -56,6 +56,105 @@ class BotAgentServiceTest extends TestCase
         $this->assertNull($conversation->pending_action);
     }
 
+    public function test_mixed_entered_and_current_stock_wording_is_rejected_without_mutation(): void
+    {
+        $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
+
+        $telegram=Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')->once()->with(
+            $chat,
+            Mockery::on(fn($text)=>str_contains($text,'mezcla mercadería que ingresó') && str_contains($text,'establecé el stock actual'))
+        );
+
+        $gemini=Mockery::mock(GeminiService::class);
+        $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'add_stock',
+            'reply'=>'Voy a sumar al stock',
+            'entities'=>[],
+            'action'=>[
+                'name'=>'add_stock',
+                'arguments'=>[
+                    'items'=>[
+                        ['product_name'=>'Papel','quantity'=>60,'presentation_name'=>'cajas'],
+                        ['product_name'=>'Papel','quantity'=>48,'presentation_name'=>'cajas'],
+                    ],
+                ],
+            ],
+            'missing'=>[],
+            'requires_confirmation'=>true,
+            'confidence'=>0.9,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldNotReceive('preview');
+        $executor=Mockery::mock(BotActionExecutor::class);
+        $executor->shouldNotReceive('execute');
+
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        app(BotAgentService::class)->processMessage(
+            $user,
+            $chat,
+            'Ayer ingresaron 60 cajas de medallón de carne, tenemos 48 cajas de pan'
+        );
+
+        $conversation=AiConversation::where('user_id',$user->id)->firstOrFail();
+        $this->assertNull($conversation->pending_action);
+        $this->assertSame('idle',$conversation->context['status']);
+    }
+
+    public function test_stock_actual_phrase_forces_set_stock_instead_of_add_stock(): void
+    {
+        $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
+
+        $telegram=Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')->once()->with($chat,'Confirmar stock actual');
+
+        $gemini=Mockery::mock(GeminiService::class);
+        $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'add_stock',
+            'reply'=>'',
+            'entities'=>[],
+            'action'=>[
+                'name'=>'add_stock',
+                'arguments'=>[
+                    'items'=>[
+                        ['product_name'=>'Papel','quantity'=>1000,'presentation_name'=>'unidad'],
+                    ],
+                ],
+            ],
+            'missing'=>[],
+            'requires_confirmation'=>true,
+            'confidence'=>0.8,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldReceive('preview')->once()->with(
+            $user,
+            Mockery::on(fn($action)=>($action['name'] ?? null)==='set_stock')
+        )->andReturn('Confirmar stock actual');
+
+        $executor=Mockery::mock(BotActionExecutor::class);
+        $executor->shouldNotReceive('execute');
+
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        app(BotAgentService::class)->processMessage(
+            $user,
+            $chat,
+            'Establecé el stock actual en 1000 unidades de papel'
+        );
+
+        $pending=AiConversation::where('user_id',$user->id)->firstOrFail()->pending_action;
+        $this->assertSame('set_stock',$pending['name']);
+    }
+
     public function test_stock_sentence_inherits_boxes_bars_and_pieces_without_leaking_to_loose_units(): void
     {
         $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
