@@ -149,11 +149,6 @@ class BotAgentService
         $bandejas=0.0;
         $product=null;
 
-        // "3 carros y 2 bandejas de cheddar"
-        if (preg_match('/\\b(?<carros>'.$number.')\\s+carritos?|\\b(?<carros_alt>'.$number.')\\s+carros?/iu',$normalized)) {
-            // handled below with the stricter compound/single patterns
-        }
-
         if (preg_match('/\\b(?<carros>'.$number.')\\s+(?:carritos?|carros?)\\s*(?:y|\\+)?\\s*(?<bandejas>'.$number.')\\s+bandejas?\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
             $carros=$this->spanishNumber((string)$match['carros']);
             $bandejas=$this->spanishNumber((string)$match['bandejas']);
