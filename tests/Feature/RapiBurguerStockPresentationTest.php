@@ -7,12 +7,14 @@ use App\Enums\MovementType;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\Recipe;
 use App\Models\Stock;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\BotActionPreviewService;
 use App\Services\ProductService;
+use App\Services\ProductionOrderService;
 use App\Services\StockService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -113,6 +115,74 @@ class RapiBurguerStockPresentationTest extends TestCase
         ]);
 
         $this->assertSame(500.0, (float) Stock::where('product_id', $queso->id)->value('quantity'));
+    }
+
+    public function test_fractional_bacon_consumption_keeps_half_piece_for_next_day(): void
+    {
+        [$company, $user, $warehouse, $category, $unit] = $this->baseData();
+
+        $bacon = $this->product($company->id, $category->id, $unit->id, 'Bacon');
+        $finished = Product::create([
+            'company_id' => $company->id,
+            'category_id' => $category->id,
+            'type' => 'finished_product',
+            'name' => 'Hamburguesa bacon',
+            'presentation' => 'unidad',
+            'base_unit_id' => $unit->id,
+            'cost' => 0,
+            'price' => 0,
+            'status' => 'active',
+        ]);
+
+        $migration = require database_path('migrations/2026_10_02_090000_finalize_rapi_burguer_material_presentations.php');
+        $migration->up();
+
+        $recipe = Recipe::create([
+            'company_id' => $company->id,
+            'product_id' => $finished->id,
+            'yield_quantity' => 288,
+        ]);
+        $recipe->items()->create([
+            'product_id' => $bacon->id,
+            'quantity_base' => 3.5,
+        ]);
+
+        Stock::create([
+            'company_id' => $company->id,
+            'product_id' => $bacon->id,
+            'warehouse_id' => $warehouse->id,
+            'quantity' => 8,
+        ]);
+
+        $result = app(ProductionOrderService::class)->registerProduction(
+            $user,
+            $finished,
+            864,
+            [$bacon->id => 7.5],
+            Channel::Telegram,
+        );
+
+        $this->assertNotNull($result['order']);
+        $this->assertSame(0.5, (float) Stock::where('product_id', $bacon->id)->sum('quantity'));
+        $this->assertDatabaseHas('production_order_items', [
+            'production_order_id' => $result['order']->id,
+            'product_id' => $bacon->id,
+            'consumed_quantity' => 7.5,
+        ]);
+
+        $preview = app(BotActionPreviewService::class)->preview($user, [
+            'name' => 'register_production',
+            'arguments' => [
+                'product_name' => 'Hamburguesa bacon',
+                'carros' => 3,
+                'actual_consumptions' => [
+                    ['product_name' => 'Bacon', 'quantity' => 7.5, 'presentation_name' => 'pieza'],
+                ],
+            ],
+        ]);
+
+        $this->assertStringContainsString('Bacon: 7.5 pieza', $preview);
+        $this->assertStringContainsString('Los demás insumos se descontarán según la receta.', $preview);
     }
 
     private function baseData(): array
