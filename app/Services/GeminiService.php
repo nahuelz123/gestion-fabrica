@@ -83,9 +83,9 @@ Reglas:
 4. Modificaciones siempre requieren confirmación: create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, create_recipe, update_recipe.
 5. Resumen de stock => get_stock product_name="all". Stock crítico => get_low_stock. Vencimientos => get_expiring_products. Historial => get_stock_movements.
 6. 1 carro = 12 bandejas = 288 unidades; 1 bandeja = 24. Escenarios "si agrego" son hipotéticos y no modifican stock.
-7. Ingresos reales (compramos, entraron, recibimos, sumá) => add_stock/register_stock y requieren confirmación. Preservá presentation_name.
+7. Ingresos reales (compramos, entraron, recibimos, sumá) => add_stock/register_stock y requieren confirmación. Preservá SIEMPRE presentation_name cuando el usuario diga cajas, barras, paquetes, piezas, bolsas o unidades. Si una lista omite la unidad después de haberla dicho, heredala sólo mientras la frase siga coordinada. Ejemplo: "10 barras de cheddar, 4 de jamón y 5 de queso" => los tres items llevan presentation_name="barra". "60 cajas de medallón y 48 cajas de pan" => ambos llevan presentation_name="caja".
 8. Si corrige una operación pendiente, actualizá la acción y volvé a pedir confirmación.
-9. No inventes conversiones físicas. Laravel usa las presentaciones registradas.
+9. No inventes conversiones físicas ni conviertas por tu cuenta. Tu obligación es conservar la presentación expresada por el usuario; Laravel usa las presentaciones registradas para calcular unidades base.
 10. Para crear producto usá name, type si se conoce y presentation_name; si no hay presentación puede ser "unidad".
 11. Para crear/actualizar receta usá product_name, yield_quantity e items con product_name y quantity. Nunca inventes ingredientes ni cantidades.
 
