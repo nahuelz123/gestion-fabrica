@@ -131,6 +131,11 @@ class BotAgentService
         if ($parsed['bandejas'] > 0) $args['bandejas']=$parsed['bandejas'];
         $args['quantity']=$parsed['quantity'];
 
+        if ($name==='register_production' && empty($args['actual_consumptions'])) {
+            $actual=$this->parseSimpleActualConsumption($text,$parsed['product_name']);
+            if ($actual) $args['actual_consumptions']=[$actual];
+        }
+
         $analysis['intent']=$name;
         $analysis['action']=['name'=>$name,'arguments'=>$args];
         $analysis['missing']=[];
@@ -194,6 +199,52 @@ class BotAgentService
             'completed'=>$completed,
             'planning'=>$planning,
         ];
+    }
+
+    /**
+     * Factory convention: when the operator says "usamos 8 piezas y quedó
+     * media", 8 is the number of pieces opened/taken and the effective
+     * consumption is 7.5. The remaining 0.5 stays in stock.
+     */
+    private function parseSimpleActualConsumption(string $text,string $finishedProduct): ?array
+    {
+        if (!preg_match('/\\b(?:usamos|gastamos|consumimos|abrimos)\\s+(?<amount>\\d+(?:[\\.,]\\d+)?)\\s+(?<unit>piezas?|barras?|cajas?|unidades?|fetas?)(?:\\s+de\\s+(?<ingredient>[^,.;]+?))?(?=\\s+y\\s+(?:qued[oó]|sobr[oó])\\b|$)/iu',$text,$match)) {
+            return null;
+        }
+
+        $amount=(float)str_replace(',','.',(string)$match['amount']);
+        if ($amount <= 0) return null;
+
+        $remainder=0.0;
+        if (preg_match('/\\b(?:qued[oó]|sobr[oó])\\s+(?<remainder>media|medio|un cuarto|0[\\.,]5|0[\\.,]25)\\s*(?:pieza|barra|caja|unidad|feta)?/iu',$text,$remaining)) {
+            $value=mb_strtolower((string)$remaining['remainder']);
+            $remainder=str_contains($value,'cuarto') || str_replace(',','.',$value)==='0.25' ? 0.25 : 0.5;
+        }
+
+        $effective=$amount-$remainder;
+        if ($effective <= 0) return null;
+
+        $ingredient=trim((string)($match['ingredient'] ?? ''));
+        if ($ingredient==='') {
+            $normalized=$this->normalizeFactoryProductName($finishedProduct);
+            if (str_contains($normalized,'bacon')) $ingredient='bacon';
+            elseif (str_contains($normalized,'lomito')) $ingredient='lomito';
+            elseif (str_contains($normalized,'cheddar') || str_contains($normalized,'chedar')) $ingredient='cheddar';
+            else return null; // Jamón y queso is ambiguous without naming the ingredient.
+        }
+
+        return [
+            'product_name'=>trim($ingredient),
+            'quantity'=>$effective,
+            'presentation_name'=>$this->singularPresentationWord((string)$match['unit']),
+        ];
+    }
+
+    private function normalizeFactoryProductName(string $value): string
+    {
+        $value=mb_strtolower($value);
+        $value=strtr($value,['á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u','ñ'=>'n']);
+        return trim((string)preg_replace('/\\s+/u',' ',$value));
     }
 
     private function spanishNumber(string $value): float
