@@ -146,7 +146,7 @@ class BotAgentService
             if ($quantity <= 0) continue;
 
             $quantityPattern=preg_quote($this->plainNumber($quantity),'/');
-            $remaining=mb_substr($text,$cursor);
+            $remaining=substr($text,$cursor);
 
             if (!preg_match('/\\b'.$quantityPattern.'\\b(?:\\s+(?<unit>'.$unitPattern.'))?(?<de>\\s+de\\b)?/iu',$remaining,$match,PREG_OFFSET_CAPTURE)) {
                 continue;
@@ -154,7 +154,7 @@ class BotAgentService
 
             $full=$match[0][0] ?? '';
             $offset=(int)($match[0][1] ?? 0);
-            $cursor += $offset + mb_strlen($full);
+            $cursor += $offset + strlen($full);
 
             $unit=isset($match['unit'][0]) ? trim((string)$match['unit'][0]) : '';
             $hasDe=isset($match['de'][0]) && trim((string)$match['de'][0]) !== '';
