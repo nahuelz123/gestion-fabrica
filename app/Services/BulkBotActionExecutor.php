@@ -233,18 +233,33 @@ class BulkBotActionExecutor extends FlexibleBotActionExecutor
             return null;
         }
 
-        $needle = $this->normalize($input);
+        $needle = $this->presentationToken($input);
 
         foreach ($product->presentations()->get() as $presentation) {
-            $normalized = $this->normalize($presentation->name);
-            if ($normalized === $needle
-                || str_contains($normalized, $needle)
-                || str_contains($needle, $normalized)) {
+            if ($this->presentationToken((string)$presentation->name) === $needle) {
                 return $presentation;
             }
         }
 
         return null;
+    }
+
+    private function presentationToken(string $value): string
+    {
+        $normalized=$this->normalize($value);
+        $tokens=preg_split('/\\s+/',$normalized) ?: [];
+
+        foreach ($tokens as $token) {
+            if (in_array($token,['caja','cajas'],true)) return 'caja';
+            if (in_array($token,['barra','barras'],true)) return 'barra';
+            if (in_array($token,['pieza','piezas'],true)) return 'pieza';
+            if (in_array($token,['paquete','paquetes'],true)) return 'paquete';
+            if (in_array($token,['bolsa','bolsas'],true)) return 'bolsa';
+            if (in_array($token,['feta','fetas'],true)) return 'feta';
+            if (in_array($token,['unidad','unidades','u'],true)) return 'unidad';
+        }
+
+        return $normalized;
     }
 
     private function normalize(string $value): string
