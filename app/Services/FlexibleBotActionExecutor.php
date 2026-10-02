@@ -52,8 +52,16 @@ class FlexibleBotActionExecutor extends BotActionExecutor
             return $this->executePlanProduction($companyId, $args);
         }
 
+        $productionActions=[
+            'calculate_production','check_production','get_max_production',
+            'get_missing_inputs','register_production',
+        ];
+
         if (!empty($args['product_name'])) {
-            $product = $this->resolveProduct($companyId, (string) $args['product_name']);
+            $product = in_array($name,$productionActions,true)
+                ? $this->resolveFinishedProduct($companyId, (string) $args['product_name'])
+                : $this->resolveProduct($companyId, (string) $args['product_name']);
+
             if ($product) {
                 $args['product_name'] = $product->name;
                 $args['presentation_name'] = $this->resolvePresentationName(
@@ -61,6 +69,12 @@ class FlexibleBotActionExecutor extends BotActionExecutor
                     $args['presentation_name'] ?? null
                 );
             }
+        }
+
+        if (in_array($name,['calculate_production','check_production','get_missing_inputs'],true)
+            && (float)($args['quantity'] ?? 0) <= 0) {
+            $args['quantity']=((float)($args['carros'] ?? 0) * 288)
+                + ((float)($args['bandejas'] ?? 0) * 24);
         }
 
         foreach (['items', 'actual_consumptions', 'hypothetical_stock_additions', 'production_items'] as $listKey) {
