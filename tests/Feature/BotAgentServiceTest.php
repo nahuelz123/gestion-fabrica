@@ -167,6 +167,62 @@ class BotAgentServiceTest extends TestCase
         $this->assertSame(864.0,(float)$conversation->context['last_read_action']['arguments']['quantity']);
     }
 
+    public function test_completed_bacon_production_keeps_half_piece_as_remainder(): void
+    {
+        $user=$this->user('manager'); $chat=(string)$user->telegram_chat_id;
+
+        $telegram=Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')->once()->with($chat,'Confirmación producción');
+
+        $gemini=Mockery::mock(GeminiService::class);
+        $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'register_production',
+            'reply'=>'',
+            'entities'=>[],
+            'action'=>[
+                'name'=>'register_production',
+                'arguments'=>[
+                    'product_name'=>'bacon',
+                    'carros'=>3,
+                ],
+            ],
+            'missing'=>[],
+            'requires_confirmation'=>true,
+            'confidence'=>0.8,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldReceive('preview')->once()->with(
+            $user,
+            Mockery::on(function($action){
+                $actual=$action['arguments']['actual_consumptions'][0] ?? [];
+                return ($action['name'] ?? null)==='register_production'
+                    && (float)($action['arguments']['quantity'] ?? 0)===864.0
+                    && ($actual['product_name'] ?? null)==='bacon'
+                    && (float)($actual['quantity'] ?? 0)===7.5
+                    && ($actual['presentation_name'] ?? null)==='pieza';
+            })
+        )->andReturn('Confirmación producción');
+
+        $executor=Mockery::mock(BotActionExecutor::class);
+        $executor->shouldNotReceive('execute');
+
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        app(BotAgentService::class)->processMessage(
+            $user,
+            $chat,
+            'Hicimos 3 carritos de bacon y usamos 8 piezas y quedó media pieza'
+        );
+
+        $pending=AiConversation::where('user_id',$user->id)->firstOrFail()->pending_action;
+        $this->assertSame(7.5,(float)$pending['arguments']['actual_consumptions'][0]['quantity']);
+        $this->assertSame('ready_for_confirmation',AiConversation::where('user_id',$user->id)->firstOrFail()->context['status']);
+    }
+
     public function test_factory_production_phrases_parse_carts_trays_halves_and_jamon_y_queso(): void
     {
         $agent=new BotAgentService(
