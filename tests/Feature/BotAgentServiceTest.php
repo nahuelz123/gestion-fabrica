@@ -110,6 +110,63 @@ class BotAgentServiceTest extends TestCase
         $this->assertNull($pending['arguments']['items'][7]['presentation_name'] ?? null);
     }
 
+    public function test_three_carts_of_bacon_is_understood_without_asking_again(): void
+    {
+        $user=$this->user('manager'); $chat=(string)$user->telegram_chat_id;
+
+        $telegram=Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')->once()->with(
+            $chat,
+            Mockery::on(fn($text)=>str_contains($text,'864') && str_contains(mb_strtolower($text),'bacon'))
+        );
+
+        // Reproduce the bad AI response seen in production: it recognizes the
+        // production intent but forgets the amount and asks for it again.
+        $gemini=Mockery::mock(GeminiService::class);
+        $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'check_production',
+            'reply'=>'¿Cuánto querés producir y de qué producto?',
+            'entities'=>[],
+            'action'=>[
+                'name'=>'check_production',
+                'arguments'=>['product_name'=>'bacon','quantity'=>null],
+            ],
+            'missing'=>['quantity'],
+            'requires_confirmation'=>false,
+            'confidence'=>0.65,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldNotReceive('preview');
+
+        $executor=Mockery::mock(BotActionExecutor::class);
+        $executor->shouldReceive('execute')->once()->with(
+            $user,
+            $chat,
+            Mockery::on(function($action){
+                return ($action['name'] ?? null)==='check_production'
+                    && ($action['arguments']['product_name'] ?? null)==='bacon'
+                    && (float)($action['arguments']['carros'] ?? 0)===3.0
+                    && (float)($action['arguments']['quantity'] ?? 0)===864.0;
+            }),
+            Mockery::type('array')
+        )->andReturn([
+            'success'=>true,
+            'message'=>'✅ Hay stock suficiente para producir 864 u de Hamburguesa bacon.',
+        ]);
+
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        app(BotAgentService::class)->processMessage($user,$chat,'Quiero hacer 3 carritos de bacon');
+
+        $conversation=AiConversation::where('user_id',$user->id)->firstOrFail();
+        $this->assertSame('completed',$conversation->context['status']);
+        $this->assertSame(864.0,(float)$conversation->context['last_read_action']['arguments']['quantity']);
+    }
+
     public function test_pending_action_can_only_be_claimed_once(): void
     {
         $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
