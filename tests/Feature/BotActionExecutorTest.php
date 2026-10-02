@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
+use App\Models\ProductionOrder;
 use App\Models\Recipe;
 use App\Models\Stock;
 use App\Models\Unit;
@@ -148,7 +149,7 @@ class BotActionExecutorTest extends TestCase
             1000.0,
             (float)Stock::where('company_id',$d['a']->id)->where('product_id',$d['pa']->id)->sum('quantity')
         );
-        $this->assertSame(0,AppModelsProductionOrder::where('company_id',$d['a']->id)->count());
+        $this->assertSame(0,ProductionOrder::where('company_id',$d['a']->id)->count());
     }
 
     public function test_owner_can_create_and_update_product_with_current_schema(): void
