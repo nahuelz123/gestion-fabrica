@@ -46,11 +46,11 @@ class RapiBurguerStockPresentationTest extends TestCase
             'name' => 'add_stock',
             'arguments' => [
                 'items' => [
-                    ['product_name' => 'Medallón de carne', 'quantity' => 60, 'presentation_name' => 'caja'],
-                    ['product_name' => 'Pan', 'quantity' => 48, 'presentation_name' => 'caja'],
-                    ['product_name' => 'Chedar', 'quantity' => 10, 'presentation_name' => 'barra'],
-                    ['product_name' => 'Jamón', 'quantity' => 4, 'presentation_name' => 'barra'],
-                    ['product_name' => 'Queso', 'quantity' => 5, 'presentation_name' => 'barra'],
+                    ['product_name' => 'Medallón de carne', 'quantity' => 60, 'presentation_name' => 'cajas'],
+                    ['product_name' => 'Pan', 'quantity' => 48, 'presentation_name' => 'cajas'],
+                    ['product_name' => 'Chedar', 'quantity' => 10, 'presentation_name' => 'barras'],
+                    ['product_name' => 'Jamón', 'quantity' => 4, 'presentation_name' => 'barras'],
+                    ['product_name' => 'Queso', 'quantity' => 5, 'presentation_name' => 'barras'],
                 ],
             ],
         ]);
