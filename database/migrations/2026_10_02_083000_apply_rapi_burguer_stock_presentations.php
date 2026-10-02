@@ -15,7 +15,7 @@ return new class extends Migration
                 'factor' => 36,
             ],
             [
-                'names' => ['medallon', 'medallon de carne', 'medallon carne', 'paty', 'patty'],
+                'names' => ['medallon', 'medallon de carne', 'medallon carne', 'medallon de pollo', 'paty', 'patty'],
                 'presentation' => 'caja de 60',
                 'factor' => 60,
             ],
