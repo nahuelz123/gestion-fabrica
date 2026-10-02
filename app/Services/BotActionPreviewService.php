@@ -140,13 +140,12 @@ class BotActionPreviewService
             return [$quantity, null];
         }
 
-        $needle = mb_strtolower(trim($presentationName));
+        $needle = $this->presentationToken($presentationName);
         $presentation = $product->presentations()
-            ->where(function ($query) use ($needle) {
-                $query->whereRaw('LOWER(name) = ?', [$needle])
-                    ->orWhere('name', 'like', '%' . $needle . '%');
-            })
-            ->first();
+            ->get()
+            ->first(function ($candidate) use ($needle) {
+                return $this->presentationToken((string)$candidate->name) === $needle;
+            });
 
         if (!$presentation) {
             return [$quantity, $presentationName];
@@ -156,6 +155,19 @@ class BotActionPreviewService
             $quantity * (float) $presentation->conversion_factor,
             $presentation->name,
         ];
+    }
+
+    private function presentationToken(string $value): string
+    {
+        $value=mb_strtolower(trim($value));
+        if (preg_match('/\\b(caja|cajas)\\b/u',$value)) return 'caja';
+        if (preg_match('/\\b(barra|barras)\\b/u',$value)) return 'barra';
+        if (preg_match('/\\b(pieza|piezas)\\b/u',$value)) return 'pieza';
+        if (preg_match('/\\b(paquete|paquetes)\\b/u',$value)) return 'paquete';
+        if (preg_match('/\\b(bolsa|bolsas)\\b/u',$value)) return 'bolsa';
+        if (preg_match('/\\b(feta|fetas)\\b/u',$value)) return 'feta';
+        if (preg_match('/\\b(unidad|unidades|u)\\b/u',$value)) return 'unidad';
+        return $value;
     }
 
     private function number(float $value): string
