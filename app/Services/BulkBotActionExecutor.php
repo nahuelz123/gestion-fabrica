@@ -141,7 +141,8 @@ class BulkBotActionExecutor extends FlexibleBotActionExecutor
         foreach ($prepared as $entry) {
             $current = (float) $stocks->get($entry['product']->id, 0);
             $addedLabel = $entry['presentation']
-                ? $this->formatNumber($entry['quantity']) . ' ' . $entry['presentation']->name
+                ? $this->formatNumber($entry['quantity']) . ' ' . $this->displayPresentation((string)$entry['presentation']->name, (float)$entry['quantity'])
+                    . ' (' . $this->formatNumber((float)$entry['base_quantity']) . ' u)'
                 : $this->formatNumber($entry['quantity']) . ' u';
 
             $lines[] = '- ' . $entry['product']->name
@@ -242,6 +243,23 @@ class BulkBotActionExecutor extends FlexibleBotActionExecutor
         }
 
         return null;
+    }
+
+    private function displayPresentation(string $value,float $quantity): string
+    {
+        $token=$this->presentationToken($value);
+        $plural=abs($quantity-1.0) > 0.00001;
+
+        return match($token) {
+            'caja' => $plural ? 'cajas' : 'caja',
+            'barra' => $plural ? 'barras' : 'barra',
+            'pieza' => $plural ? 'piezas' : 'pieza',
+            'paquete' => $plural ? 'paquetes' : 'paquete',
+            'bolsa' => $plural ? 'bolsas' : 'bolsa',
+            'feta' => $plural ? 'fetas' : 'feta',
+            'unidad' => $plural ? 'unidades' : 'unidad',
+            default => $value,
+        };
     }
 
     private function presentationToken(string $value): string
