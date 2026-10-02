@@ -183,6 +183,67 @@ class RapiBurguerStockPresentationTest extends TestCase
         $this->assertSame(500.0, (float) Stock::where('product_id', $queso->id)->value('quantity'));
     }
 
+    public function test_real_production_estimates_replace_demo_bacon_lomito_and_jamon_queso_ratios(): void
+    {
+        [$company, $user, $warehouse, $category, $unit] = $this->baseData();
+
+        $pan = $this->product($company->id, $category->id, $unit->id, 'Pan');
+        $bacon = $this->product($company->id, $category->id, $unit->id, 'Bacon');
+        $lomito = $this->product($company->id, $category->id, $unit->id, 'Lomito');
+        $queso = $this->product($company->id, $category->id, $unit->id, 'Queso fiambre');
+        $jamon = $this->product($company->id, $category->id, $unit->id, 'Jamón fiambre');
+
+        $hBacon = Product::create([
+            'company_id'=>$company->id,'category_id'=>$category->id,'type'=>'finished_product',
+            'name'=>'Hamburguesa bacon','presentation'=>'unidad','base_unit_id'=>$unit->id,
+            'cost'=>0,'price'=>0,'status'=>'active',
+        ]);
+        $hLomito = Product::create([
+            'company_id'=>$company->id,'category_id'=>$category->id,'type'=>'finished_product',
+            'name'=>'Hamburguesa lomito','presentation'=>'unidad','base_unit_id'=>$unit->id,
+            'cost'=>0,'price'=>0,'status'=>'active',
+        ]);
+        $hJq = Product::create([
+            'company_id'=>$company->id,'category_id'=>$category->id,'type'=>'finished_product',
+            'name'=>'Hamburguesa jamón y queso','presentation'=>'unidad','base_unit_id'=>$unit->id,
+            'cost'=>0,'price'=>0,'status'=>'active',
+        ]);
+
+        foreach ([
+            [$hBacon, [[$pan,24],[$bacon,24]]],
+            [$hLomito, [[$pan,24],[$lomito,24]]],
+            [$hJq, [[$pan,24],[$queso,24],[$jamon,24]]],
+        ] as [$finished,$ingredients]) {
+            $recipe=Recipe::create([
+                'company_id'=>$company->id,
+                'product_id'=>$finished->id,
+                'yield_quantity'=>24,
+            ]);
+            foreach ($ingredients as [$ingredient,$qty]) {
+                $recipe->items()->create([
+                    'product_id'=>$ingredient->id,
+                    'quantity_base'=>$qty,
+                ]);
+            }
+        }
+
+        (require database_path('migrations/2026_10_02_144000_apply_rapi_burguer_production_estimates.php'))->up();
+
+        $baconRecipe=$hBacon->recipe()->firstOrFail();
+        $lomitoRecipe=$hLomito->recipe()->firstOrFail();
+        $jqRecipe=$hJq->recipe()->firstOrFail();
+
+        $this->assertSame(288.0,(float)$baconRecipe->yield_quantity);
+        $this->assertSame(288.0,(float)$lomitoRecipe->yield_quantity);
+        $this->assertSame(288.0,(float)$jqRecipe->yield_quantity);
+
+        $this->assertSame(288.0,(float)$baconRecipe->items()->where('product_id',$pan->id)->value('quantity_base'));
+        $this->assertSame(3.5,(float)$baconRecipe->items()->where('product_id',$bacon->id)->value('quantity_base'));
+        $this->assertSame(2.5,(float)$lomitoRecipe->items()->where('product_id',$lomito->id)->value('quantity_base'));
+        $this->assertSame(250.0,(float)$jqRecipe->items()->where('product_id',$queso->id)->value('quantity_base'));
+        $this->assertSame(280.0,(float)$jqRecipe->items()->where('product_id',$jamon->id)->value('quantity_base'));
+    }
+
     public function test_fractional_bacon_consumption_keeps_half_piece_for_next_day(): void
     {
         [$company, $user, $warehouse, $category, $unit] = $this->baseData();
