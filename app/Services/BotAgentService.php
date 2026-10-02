@@ -127,14 +127,9 @@ class BotAgentService
 
         $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $args['product_name']=$parsed['product_name'];
-
-        if ($parsed['unit']==='carro') {
-            $args['carros']=$parsed['amount'];
-            $args['quantity']=$parsed['amount'] * 288;
-        } else {
-            $args['bandejas']=$parsed['amount'];
-            $args['quantity']=$parsed['amount'] * 24;
-        }
+        if ($parsed['carros'] > 0) $args['carros']=$parsed['carros'];
+        if ($parsed['bandejas'] > 0) $args['bandejas']=$parsed['bandejas'];
+        $args['quantity']=$parsed['quantity'];
 
         $analysis['intent']=$name;
         $analysis['action']=['name'=>$name,'arguments'=>$args];
@@ -148,19 +143,47 @@ class BotAgentService
     private function parseProductionPhrase(string $text): ?array
     {
         $normalized=trim(mb_strtolower($text));
-        $number='(?<amount>\\d+(?:[\\.,]\\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)';
-        $unit='(?<unit>carritos?|carros?|bandejas?)';
+        $number='(?:\\d+(?:[\\.,]\\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)';
 
-        if (!preg_match('/\\b'.$number.'\\s+'.$unit.'\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
+        $carros=0.0;
+        $bandejas=0.0;
+        $product=null;
+
+        // "3 carros y 2 bandejas de cheddar"
+        if (preg_match('/\\b(?<carros>'.$number.')\\s+carritos?|\\b(?<carros_alt>'.$number.')\\s+carros?/iu',$normalized)) {
+            // handled below with the stricter compound/single patterns
+        }
+
+        if (preg_match('/\\b(?<carros>'.$number.')\\s+(?:carritos?|carros?)\\s*(?:y|\\+)?\\s*(?<bandejas>'.$number.')\\s+bandejas?\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
+            $carros=$this->spanishNumber((string)$match['carros']);
+            $bandejas=$this->spanishNumber((string)$match['bandejas']);
+            $product=(string)$match['product'];
+        }
+        // "3 carros y medio de bacon"
+        elseif (preg_match('/\\b(?<carros>'.$number.')\\s+(?:carritos?|carros?)\\s+y\\s+medio\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
+            $carros=$this->spanishNumber((string)$match['carros']) + 0.5;
+            $product=(string)$match['product'];
+        }
+        // "3 carritos de bacon" / "2 bandejas de cheddar"
+        elseif (preg_match('/\\b(?<amount>'.$number.')\\s+(?<unit>carritos?|carros?|bandejas?)\\s+(?:de\\s+)?(?<product>.+)$/iu',$normalized,$match)) {
+            $amount=$this->spanishNumber((string)$match['amount']);
+            if ($amount <= 0) return null;
+
+            if (str_starts_with(mb_strtolower((string)$match['unit']),'bandeja')) {
+                $bandejas=$amount;
+            } else {
+                $carros=$amount;
+            }
+            $product=(string)$match['product'];
+        } else {
             return null;
         }
 
-        $amount=$this->spanishNumber((string)$match['amount']);
-        if ($amount <= 0) return null;
+        if ($carros <= 0 && $bandejas <= 0) return null;
 
-        $product=trim((string)$match['product']);
+        $product=trim((string)$product);
         // Closing-production details belong to actual_consumptions and must not
-        // become part of the product name.
+        // become part of the product name. "jamón y queso" remains intact.
         $product=preg_split('/\\s+y\\s+(?:usamos|gastamos|consumimos|qued[oó]|sobr[oó])\\b/iu',$product,2)[0] ?? $product;
         $product=trim($product," \t\n\r\0\x0B.,;:!?");
         if ($product==='') return null;
@@ -168,13 +191,10 @@ class BotAgentService
         $completed=(bool)preg_match('/\\b(hicimos|terminamos|producimos|fabricamos|salieron|salio|salió)\\b/iu',$normalized);
         $planning=(bool)preg_match('/\\b(quiero|queremos|vamos|necesito|necesitamos|podemos|puedo|hacer|producir|alcanza|alcanzan)\\b/iu',$normalized);
 
-        $unitToken=str_starts_with(mb_strtolower((string)$match['unit']),'bandeja')
-            ? 'bandeja'
-            : 'carro';
-
         return [
-            'amount'=>$amount,
-            'unit'=>$unitToken,
+            'carros'=>$carros,
+            'bandejas'=>$bandejas,
+            'quantity'=>($carros * 288) + ($bandejas * 24),
             'product_name'=>$product,
             'completed'=>$completed,
             'planning'=>$planning,
