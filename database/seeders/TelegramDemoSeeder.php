@@ -87,8 +87,8 @@ class TelegramDemoSeeder extends Seeder
         $fCheddar = $createProd('Fiambre cheddar', $catMP, 'raw_material', 'barra de 200 fetas', 200, 5);
         $bacon = $createProd('Bacon', $catMP, 'raw_material', 'unidad', 1, 1500);
         $lomito = $createProd('Lomito', $catMP, 'raw_material', 'unidad', 1, 1500);
-        $qFiambre = $createProd('Queso fiambre', $catMP, 'raw_material', 'unidad', 1, 500);
-        $jFiambre = $createProd('Jamón fiambre', $catMP, 'raw_material', 'unidad', 1, 500);
+        $qFiambre = $createProd('Queso fiambre', $catMP, 'raw_material', 'barra de 200', 200, 3);
+        $jFiambre = $createProd('Jamón fiambre', $catMP, 'raw_material', 'barra de 240', 240, 3);
         $mCarne = $createProd('Medallón de carne', $catMP, 'raw_material', 'caja de 60', 60, 10);
         $mPollo = $createProd('Medallón de pollo', $catMP, 'raw_material', 'caja de 60', 60, 5);
 
