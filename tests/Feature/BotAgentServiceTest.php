@@ -167,6 +167,35 @@ class BotAgentServiceTest extends TestCase
         $this->assertSame(864.0,(float)$conversation->context['last_read_action']['arguments']['quantity']);
     }
 
+    public function test_factory_production_phrases_parse_carts_trays_halves_and_jamon_y_queso(): void
+    {
+        $agent=new BotAgentService(
+            Mockery::mock(TelegramService::class),
+            Mockery::mock(GeminiService::class),
+            app(\App\Services\StockService::class),
+            app(\App\Services\ProductionCalculatorService::class),
+            Mockery::mock(BotActionPreviewService::class)
+        );
+
+        $method=new ReflectionMethod(BotAgentService::class,'parseProductionPhrase');
+        $method->setAccessible(true);
+
+        $compound=$method->invoke($agent,'quiero hacer 3 carros y 2 bandejas de cheddar');
+        $this->assertSame(3.0,(float)$compound['carros']);
+        $this->assertSame(2.0,(float)$compound['bandejas']);
+        $this->assertSame(912.0,(float)$compound['quantity']);
+        $this->assertSame('cheddar',$compound['product_name']);
+
+        $half=$method->invoke($agent,'quiero hacer 3 carros y medio de cheddar');
+        $this->assertSame(3.5,(float)$half['carros']);
+        $this->assertSame(1008.0,(float)$half['quantity']);
+
+        $completed=$method->invoke($agent,'hicimos 3 carritos de jamón y queso y usamos 3 barras de jamón');
+        $this->assertTrue($completed['completed']);
+        $this->assertSame(864.0,(float)$completed['quantity']);
+        $this->assertSame('jamón y queso',$completed['product_name']);
+    }
+
     public function test_pending_action_can_only_be_claimed_once(): void
     {
         $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
