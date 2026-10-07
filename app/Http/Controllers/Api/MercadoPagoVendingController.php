@@ -115,11 +115,20 @@ class MercadoPagoVendingController extends Controller
 
     public function webhook(Request $request)
     {
-        $secret = (string) config('services.mercadopago.webhook_secret');
+        $secret = trim((string) config('services.mercadopago.webhook_secret'), " \t\n\r\0\x0B\"'");
         if ($secret === '') {
             return response()->json(['error' => 'Webhook not configured'], 503);
         }
         if (!$this->validSignature($request, $secret)) {
+            logger()->warning('Mercado Pago webhook signature rejected', [
+                'has_x_signature' => $request->hasHeader('x-signature'),
+                'has_x_request_id' => $request->hasHeader('x-request-id'),
+                'query_data_id' => (string) ($request->query->get('data.id') ?? $request->query->get('data_id') ?? ''),
+                'body_data_id' => (string) data_get($request->json()->all(), 'data.id', ''),
+                'type' => (string) data_get($request->json()->all(), 'type', ''),
+                'action' => (string) data_get($request->json()->all(), 'action', ''),
+            ]);
+
             return response()->json(['error' => 'Invalid signature'], 401);
         }
 
