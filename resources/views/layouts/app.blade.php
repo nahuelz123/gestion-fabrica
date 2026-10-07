@@ -43,6 +43,7 @@
                 <a href="{{ route('products.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('products.*') || request()->routeIs('recipes.*') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">🍔 <span class="ml-3">Productos y recetas</span></a>
                 <a href="{{ route('suppliers.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('suppliers.*') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">👥 <span class="ml-3">Proveedores</span></a>
                 <a href="{{ route('vending.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('vending.*') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">🏪 <span class="ml-3">Máquinas</span></a>
+                <a href="{{ route('users.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('users.*') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">🔐 <span class="ml-3">Usuarios</span></a>
             @endcan
         </nav>
         <div class="px-6 py-6 mt-6 border-t text-xs text-gray-500 space-y-1">
