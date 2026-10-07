@@ -46,7 +46,7 @@ class NotifyVendingSaleJob implements ShouldQueue
         User::where('company_id', $sale->company_id)
             ->whereNotNull('telegram_chat_id')
             ->where('status', 'active')
-            ->whereIn('role', ['owner', 'manager'])
+            ->where('role', 'owner')
             ->pluck('telegram_chat_id')
             ->unique()
             ->each(fn ($chatId) => $telegram->sendMessage((string) $chatId, $message));
