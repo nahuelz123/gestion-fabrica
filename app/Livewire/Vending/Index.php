@@ -44,6 +44,44 @@ class Index extends Component
         }
     }
 
+    public function toggleStatus(int $machineId, MercadoPagoVendingService $service): void
+    {
+        Gate::authorize('owner-only');
+
+        $machine = VendingMachine::where('company_id', auth()->user()->company_id)
+            ->with(['partner', 'product'])
+            ->findOrFail($machineId);
+
+        if ($machine->status === 'active') {
+            try {
+                if ($machine->partner?->hasMercadoPagoConnection()) {
+                    $service->cancelActiveOrders($machine);
+                }
+
+                $machine->update(['status' => 'inactive']);
+                session()->flash('message', "{$machine->name} quedó pausada. Su pantalla pública deja de estar disponible.");
+            } catch (Throwable $e) {
+                report($e);
+                session()->flash('error', 'No se pudo pausar la máquina: ' . $e->getMessage());
+            }
+
+            return;
+        }
+
+        $machine->update(['status' => 'active']);
+
+        try {
+            if ($machine->partner?->hasMercadoPagoConnection()) {
+                $service->provisionMachine($machine->fresh(['partner', 'product']), false);
+            }
+            session()->flash('message', "{$machine->name} quedó activa.");
+        } catch (Throwable $e) {
+            $machine->update(['status' => 'inactive']);
+            report($e);
+            session()->flash('error', 'No se pudo activar la máquina: ' . $e->getMessage());
+        }
+    }
+
     public function render()
     {
         $companyId = auth()->user()->company_id;
