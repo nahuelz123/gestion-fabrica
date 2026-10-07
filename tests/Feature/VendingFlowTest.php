@@ -177,6 +177,46 @@ class VendingFlowTest extends TestCase
         $this->assertNotEmpty($sale->receipt_number);
     }
 
+    public function test_processed_order_with_wrong_amount_is_rejected_and_creates_no_sale(): void
+    {
+        Queue::fake([RefreshVendingMachineOrderJob::class, NotifyVendingSaleJob::class]);
+
+        $order = VendingPaymentOrder::create([
+            'company_id' => $this->company->id,
+            'vending_partner_id' => $this->partner->id,
+            'vending_machine_id' => $this->machine->id,
+            'external_reference' => 'VM1_BAD_AMOUNT',
+            'mercadopago_order_id' => 'ORDER-BAD-AMOUNT',
+            'amount' => 10000,
+            'status' => 'created',
+            'expires_at' => now()->addDay(),
+        ]);
+
+        Http::fake([
+            'https://api.mercadopago.com/v1/orders/ORDER-BAD-AMOUNT' => Http::response([
+                'id' => 'ORDER-BAD-AMOUNT',
+                'status' => 'processed',
+                'status_detail' => 'accredited',
+                'external_reference' => $order->external_reference,
+                'total_amount' => '15000.00',
+                'total_paid_amount' => '15000.00',
+                'transactions' => ['payments' => [['id' => 'PAY-BAD', 'amount' => '15000.00']]],
+            ], 200),
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('importe confirmado por Mercado Pago no coincide');
+
+        try {
+            app(MercadoPagoVendingService::class)->processVerifiedWebhook([
+                'id' => 'evt-bad-amount',
+                'data' => ['id' => 'ORDER-BAD-AMOUNT'],
+            ]);
+        } finally {
+            $this->assertDatabaseCount('vending_sales', 0);
+        }
+    }
+
     public function test_refund_updates_sale_without_touching_machine_stock(): void
     {
         Queue::fake([RefreshVendingMachineOrderJob::class, NotifyVendingSaleJob::class]);
@@ -293,10 +333,20 @@ class VendingFlowTest extends TestCase
             ->assertStatus(202);
 
         $this->postJson('/mercadopago/webhook?data_id=ORDER-ABC', $payload, $headers)
+            ->assertStatus(202)
+            ->assertJson(['status' => 'retry_accepted']);
+
+        $this->assertDatabaseCount('mercadopago_webhook_events', 1);
+        Queue::assertPushed(ProcessMercadoPagoWebhookJob::class, 2);
+
+        \Illuminate\Support\Facades\DB::table('mercadopago_webhook_events')
+            ->where('event_id', 'EVENT-ABC')
+            ->update(['processed_at' => now()]);
+
+        $this->postJson('/mercadopago/webhook?data_id=ORDER-ABC', $payload, $headers)
             ->assertOk()
             ->assertJson(['status' => 'duplicate']);
 
-        $this->assertDatabaseCount('mercadopago_webhook_events', 1);
-        Queue::assertPushed(ProcessMercadoPagoWebhookJob::class, 1);
+        Queue::assertPushed(ProcessMercadoPagoWebhookJob::class, 2);
     }
 }
