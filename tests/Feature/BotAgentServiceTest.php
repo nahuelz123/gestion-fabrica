@@ -198,7 +198,7 @@ class BotAgentServiceTest extends TestCase
         app(BotAgentService::class)->processMessage(
             $user,
             $chat,
-            'Ayer ingresaron 60 cajas de medallón de carne, tenemos 48 cajas de pan 10 barras de queso cheddar 4 de jamón 5 de queso 15 piezas de bacon y 10 de lomito 2000 bolsitas y 1000 papel manteca'
+            'Ayer ingresaron 60 cajas de medallón de carne, 48 cajas de pan, 10 barras de queso cheddar, 4 de jamón, 5 de queso, 15 piezas de bacon y 10 de lomito, 2000 bolsitas y 1000 papel manteca'
         );
 
         $pending=AiConversation::where('user_id',$user->id)->firstOrFail()->pending_action;
