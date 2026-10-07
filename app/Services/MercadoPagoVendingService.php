@@ -318,6 +318,8 @@ class MercadoPagoVendingService
             $order = $this->fetchOrder($partner, $resourceId);
         }
 
+        $this->validateFetchedOrder($order, $paymentOrder);
+
         $saleToNotify = null;
 
         DB::transaction(function () use ($order, $paymentOrder, $partner, &$saleToNotify) {
@@ -412,6 +414,46 @@ class MercadoPagoVendingService
 
         if ($saleToNotify) NotifyVendingSaleJob::dispatch($saleToNotify->id);
         return $saleToNotify;
+    }
+
+    private function validateFetchedOrder(array $order, VendingPaymentOrder $paymentOrder): void
+    {
+        $providerOrderId = (string) ($order['id'] ?? '');
+        $expectedOrderId = (string) ($paymentOrder->mercadopago_order_id ?? '');
+
+        if ($providerOrderId === '' || ($expectedOrderId !== '' && !hash_equals($expectedOrderId, $providerOrderId))) {
+            throw new RuntimeException('Mercado Pago devolvió una orden distinta a la esperada.');
+        }
+
+        $externalReference = (string) ($order['external_reference'] ?? '');
+        if ($externalReference === '' || !hash_equals((string) $paymentOrder->external_reference, $externalReference)) {
+            throw new RuntimeException('La referencia de la orden de Mercado Pago no coincide con la máquina esperada.');
+        }
+
+        $expectedAmount = round((float) $paymentOrder->amount, 2);
+        $providerAmount = (float) (
+            $order['total_amount']
+            ?? data_get($order, 'transactions.payments.0.amount')
+            ?? 0
+        );
+
+        if ($providerAmount <= 0 || abs(round($providerAmount, 2) - $expectedAmount) > 0.009) {
+            throw new RuntimeException('El importe confirmado por Mercado Pago no coincide con el precio esperado de la máquina.');
+        }
+
+        $machine = VendingMachine::whereKey($paymentOrder->vending_machine_id)->first();
+        if (!$machine
+            || (int) $machine->company_id !== (int) $paymentOrder->company_id
+            || (int) $machine->vending_partner_id !== (int) $paymentOrder->vending_partner_id) {
+            throw new RuntimeException('La orden no coincide con la máquina o el comercio registrados.');
+        }
+
+        $providerPos = (string) data_get($order, 'config.qr.external_pos_id', '');
+        if ($providerPos !== ''
+            && filled($machine->mercadopago_external_pos_id)
+            && !hash_equals((string) $machine->mercadopago_external_pos_id, $providerPos)) {
+            throw new RuntimeException('La caja de Mercado Pago de la orden no coincide con esta máquina.');
+        }
     }
 
     private function refundedAmount(array $order): float
