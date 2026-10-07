@@ -25,6 +25,7 @@ class StockManager extends Component
     public string $adjustMode = 'set';
     public string $adjustQty = '';
     public string $adjustPresentationId = '';
+    public bool $attentionOnly = false;
     public ?string $successMessage = null;
     public ?string $errorMessage = null;
 
@@ -33,6 +34,7 @@ class StockManager extends Component
         Gate::authorize('manage-stock');
         $warehouse = Warehouse::where('company_id', auth()->user()->company_id)->orderBy('id')->first();
         $this->warehouse_id = $warehouse ? (string) $warehouse->id : '';
+        $this->attentionOnly = request()->boolean('attention');
     }
     public function updatedSearch(): void { $this->resetPage(); }
     public function updatedPerPage(): void { $this->perPage = max(10, min($this->perPage, 100)); $this->resetPage(); }
@@ -112,7 +114,12 @@ class StockManager extends Component
             })
             ->with(['baseUnit:id,abbreviation'])
             ->withSum(['stocks as current_stock' => fn ($q) => $q->where('company_id', $companyId)], 'quantity')
-            ->orderBy('name')->paginate(max(10, min($this->perPage, 100)));
+            ->when($this->attentionOnly, function ($query) {
+                $query->havingRaw('COALESCE(current_stock, 0) <= 0 OR (min_stock IS NOT NULL AND min_stock > 0 AND COALESCE(current_stock, 0) <= min_stock)');
+            })
+            ->orderByRaw($this->attentionOnly ? 'COALESCE(current_stock, 0) ASC' : 'name ASC')
+            ->when($this->attentionOnly, fn ($query) => $query->orderBy('name'))
+            ->paginate(max(10, min($this->perPage, 100)));
         $selectedProduct = $this->selectedProductId
             ? Product::where('company_id', $companyId)->with(['presentations', 'baseUnit'])->find($this->selectedProductId) : null;
         $selectedStock = ($selectedProduct && $this->warehouse_id)
