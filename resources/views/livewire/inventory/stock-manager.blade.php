@@ -69,7 +69,72 @@
                 @if($successMessage)<div class="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-800 text-sm">{{ $successMessage }}</div>@endif
                 @if($errorMessage)<div class="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm">{{ $errorMessage }}</div>@endif
 
-                @if($adjustMode === 'set')
+                @if($selectedProduct->requires_lot)
+                    <div class="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        Este producto se controla por lote. Para no perder la trazabilidad, las correcciones se hacen indicando el lote.
+                    </div>
+
+                    <div class="border-t pt-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-medium text-gray-900">Corrección por lote</h3>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 mb-3">
+                            <button wire:click="$set('adjustMode','add')" class="border rounded-lg px-3 py-2 {{ $adjustMode === 'add' ? 'bg-green-50 border-green-300' : '' }}">+ Sumar</button>
+                            <button wire:click="$set('adjustMode','subtract')" class="border rounded-lg px-3 py-2 {{ $adjustMode === 'subtract' ? 'bg-red-50 border-red-300' : '' }}">− Restar</button>
+                        </div>
+
+                        @if($adjustMode === 'subtract')
+                            <label class="block text-sm font-medium text-gray-700">Lote *</label>
+                            <select wire:model="lot_id" class="w-full border rounded-lg px-3 py-3 mt-1 mb-1">
+                                <option value="">Elegir lote...</option>
+                                @foreach($availableLots as $stockRow)
+                                    <option value="{{ $stockRow->lot_id }}">
+                                        {{ $stockRow->lot->lot_code }}
+                                        · {{ rtrim(rtrim(number_format((float)$stockRow->quantity, 2, '.', ''), '0'), '.') }} {{ $selectedProduct->baseUnit->abbreviation ?? 'u' }}
+                                        @if($stockRow->lot->expiration_date)
+                                            · vence {{ $stockRow->lot->expiration_date->format('d/m/Y') }}
+                                        @endif
+                                    </option>
+                                @endforeach
+                            </select>
+                            @error('lot_id')<p class="text-xs text-red-600 mb-3">{{ $message }}</p>@enderror
+                            @if($availableLots->isEmpty())
+                                <p class="text-xs text-red-600 mb-3">No hay lotes con stock disponible para descontar.</p>
+                            @endif
+                        @else
+                            <div class="grid sm:grid-cols-2 gap-3 mb-3">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700">Código de lote *</label>
+                                    <input wire:model="lot_code" class="w-full border rounded-lg px-3 py-3 mt-1" placeholder="Ej. AJUSTE-20261007">
+                                    @error('lot_code')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                                </div>
+                                @if($selectedProduct->requires_expiration)
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700">Vencimiento {{ $selectedProduct->shelf_life_days ? '(opcional)' : '*' }}</label>
+                                        <input wire:model="expiration_date" type="date" class="w-full border rounded-lg px-3 py-3 mt-1">
+                                        @if($selectedProduct->shelf_life_days)
+                                            <p class="text-xs text-gray-500 mt-1">Si lo dejás vacío, se calcula con la vida útil configurada.</p>
+                                        @endif
+                                        @error('expiration_date')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+                                    </div>
+                                @endif
+                            </div>
+                        @endif
+
+                        @if($selectedProduct->presentations->isNotEmpty())
+                            <select wire:model="adjustPresentationId" class="w-full border rounded-lg px-3 py-3 mb-3">
+                                <option value="">Unidad base</option>
+                                @foreach($selectedProduct->presentations as $p)<option value="{{ $p->id }}">{{ $p->name }}</option>@endforeach
+                            </select>
+                        @endif
+
+                        <input wire:model="adjustQty" type="number" step="0.01" min="0.01" class="w-full border rounded-lg px-4 py-3" placeholder="Cantidad">
+                        @error('adjustQty')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
+
+                        <button wire:click="applyAdjustment" wire:loading.attr="disabled" class="w-full bg-gray-900 text-white rounded-lg py-3 mt-4 font-semibold disabled:opacity-50">Aplicar corrección</button>
+                    </div>
+                @elseif($adjustMode === 'set')
                     <label class="block text-sm font-medium text-gray-700">¿Cuánto contaste realmente?</label>
                     <input wire:model="adjustQty" type="number" step="0.01" min="0.01" class="w-full border rounded-lg px-4 py-3 mt-1 text-lg" placeholder="Ej. 1250">
                     @error('adjustQty')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
