@@ -4,6 +4,16 @@
         <p class="text-sm text-gray-500 mt-1">Buscá un producto, poné cuánto contaste y listo. El sistema guarda la diferencia automáticamente.</p>
     </div>
 
+    @if($attentionOnly)
+        <div class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+                <div class="font-semibold text-red-800">⚠️ Mostrando sólo productos que necesitan atención</div>
+                <div class="text-sm text-red-700 mt-1">Podés seleccionar cualquiera y corregir el stock directamente.</div>
+            </div>
+            <button wire:click="$set('attentionOnly', false)" class="text-sm font-medium text-red-700 underline">Ver todos</button>
+        </div>
+    @endif
+
     <div class="mb-4 flex flex-col sm:flex-row gap-3">
         <input wire:model.live.debounce.300ms="search" placeholder="Buscar producto..." class="flex-1 border rounded-lg px-4 py-3 text-base">
         <select wire:model.live="perPage" class="border rounded-lg px-3 py-3 text-sm"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select>
@@ -16,8 +26,19 @@
                 <tbody>
                 @forelse($products as $product)
                     <tr class="border-t hover:bg-gray-50">
-                        <td class="p-3 font-medium">{{ $product->name }}<div class="text-xs text-gray-400">{{ $product->internal_code }}</div></td>
-                        <td class="p-3 text-right">{{ number_format((float)($product->current_stock ?? 0),2,',','.') }} {{ $product->baseUnit->abbreviation ?? '' }}</td>
+                        <td class="p-3 font-medium">
+                            {{ $product->name }}
+                            <div class="text-xs text-gray-400">{{ $product->internal_code }}</div>
+                            @if((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock))
+                                <div class="text-xs text-red-600 font-semibold mt-1">
+                                    ⚠️ {{ (float)($product->current_stock ?? 0) <= 0 ? 'Sin stock' : 'Stock bajo' }}
+                                    @if($product->min_stock !== null && (float)$product->min_stock > 0)
+                                        · mínimo {{ rtrim(rtrim(number_format((float)$product->min_stock, 2, '.', ''), '0'), '.') }} {{ $product->baseUnit->abbreviation ?? '' }}
+                                    @endif
+                                </div>
+                            @endif
+                        </td>
+                        <td class="p-3 text-right {{ ((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock)) ? 'text-red-700 font-bold' : '' }}">{{ number_format((float)($product->current_stock ?? 0),2,',','.') }} {{ $product->baseUnit->abbreviation ?? '' }}</td>
                         <td class="p-3 text-right"><button wire:click="selectProduct({{ $product->id }})" class="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs">Contar</button></td>
                     </tr>
                 @empty
