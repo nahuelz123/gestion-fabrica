@@ -58,6 +58,8 @@ class BotAgentService
         $analysis=$this->repairStockMutationLanguage($analysis,$textNorm);
 
         if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
+            $context['status']='idle';
+            $context['pending_action']=null;
             $reply=$analysis['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.';
             $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
             $this->telegramService->sendMessage($chatId,$reply); return;
