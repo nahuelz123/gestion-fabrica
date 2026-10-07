@@ -87,4 +87,55 @@ class LowStockDashboardTest extends TestCase
             ->assertSee('Bolsitas')
             ->assertDontSee('Cheddar');
     }
+    public function test_lot_controlled_low_stock_can_be_corrected_from_attention_screen(): void
+    {
+        $this->withoutVite();
+
+        $company = Company::create(['name' => 'Rapi Burguer']);
+        $owner = User::create([
+            'company_id' => $company->id,
+            'name' => 'Dueño',
+            'email' => 'owner-lot@example.test',
+            'password' => 'secret12345',
+            'role' => 'owner',
+            'status' => 'active',
+        ]);
+        $unit = Unit::create(['name' => 'Unidad', 'abbreviation' => 'u', 'type' => 'count']);
+        $category = ProductCategory::create(['company_id' => $company->id, 'name' => 'Terminados']);
+        Warehouse::create(['company_id' => $company->id, 'name' => 'Principal']);
+
+        $hamburguesa = Product::create([
+            'company_id' => $company->id,
+            'category_id' => $category->id,
+            'type' => 'finished_product',
+            'name' => 'Hamburguesa',
+            'internal_code' => 'HAM-LOT',
+            'presentation' => 'unidad',
+            'base_unit_id' => $unit->id,
+            'requires_lot' => true,
+            'requires_expiration' => true,
+            'shelf_life_days' => 30,
+            'min_stock' => 10,
+            'status' => 'active',
+        ]);
+
+        Livewire::actingAs($owner)
+            ->withQueryParams(['attention' => '1'])
+            ->test(StockManager::class)
+            ->call('selectProduct', $hamburguesa->id)
+            ->assertSet('adjustMode', 'add')
+            ->assertSee('Código de lote')
+            ->set('lot_code', 'AJUSTE-TEST')
+            ->set('adjustQty', '1250')
+            ->call('applyAdjustment')
+            ->assertSet('successMessage', 'Sumé 1250 u de Hamburguesa. Stock en Principal: 1250 u.');
+
+        $this->assertDatabaseHas('stock_lots', [
+            'company_id' => $company->id,
+            'product_id' => $hamburguesa->id,
+            'lot_code' => 'AJUSTE-TEST',
+        ]);
+        $this->assertSame(1250.0, (float) Stock::where('product_id', $hamburguesa->id)->sum('quantity'));
+    }
+
 }
