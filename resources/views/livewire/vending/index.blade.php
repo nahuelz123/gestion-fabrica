@@ -61,9 +61,13 @@
                             @if($machine->isReady())
                                 <a href="{{ $machine->tabletUrl() }}" target="_blank" class="text-green-700 font-medium mr-3">Tablet</a>
                             @endif
-                            @if($machine->partner->hasMercadoPagoConnection())
+                            @if($machine->partner->hasMercadoPagoConnection() && $machine->status === 'active')
                                 <button wire:click="provision({{ $machine->id }})" wire:loading.attr="disabled" class="text-amber-700 font-medium mr-3">Sincronizar</button>
                             @endif
+                            <button wire:click="toggleStatus({{ $machine->id }})" wire:loading.attr="disabled"
+                                class="{{ $machine->status === 'active' ? 'text-gray-600' : 'text-green-700' }} font-medium mr-3">
+                                {{ $machine->status === 'active' ? 'Pausar' : 'Activar' }}
+                            </button>
                             <a href="{{ route('vending.machines.edit', $machine->id) }}" wire:navigate class="text-red-700 font-medium">Editar</a>
                         </td>
                     </tr>
