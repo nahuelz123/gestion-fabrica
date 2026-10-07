@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Livewire\Vending\Index as VendingIndex;
 use App\Livewire\Vending\MachineForm;
 use App\Livewire\Vending\PartnerForm;
 use App\Models\Company;
@@ -149,6 +150,52 @@ class VendingSimpleUxTest extends TestCase
             ->assertOk()
             ->assertSee('Falta la configuración general de Mercado Pago')
             ->assertSee('Mercado Pago pendiente de configuración');
+    }
+
+    public function test_owner_can_pause_machine_and_public_tablet_stops_working(): void
+    {
+        $unit = Unit::create(['name' => 'Unidad', 'abbreviation' => 'u', 'type' => 'count']);
+        $category = ProductCategory::create([
+            'company_id' => $this->company->id,
+            'name' => 'Terminados',
+        ]);
+        $product = Product::create([
+            'company_id' => $this->company->id,
+            'category_id' => $category->id,
+            'type' => 'finished_product',
+            'name' => 'Hamburguesa bacon',
+            'presentation' => 'unidad',
+            'base_unit_id' => $unit->id,
+            'status' => 'active',
+        ]);
+        $partner = VendingPartner::create([
+            'company_id' => $this->company->id,
+            'name' => 'Kiosco Pausa',
+            'address' => 'Centro',
+            'commission_percent' => 0,
+            'status' => 'active',
+        ]);
+        $machine = VendingMachine::create([
+            'company_id' => $this->company->id,
+            'vending_partner_id' => $partner->id,
+            'product_id' => $product->id,
+            'code' => 'MAQ-PAUSA',
+            'name' => 'Máquina pausa',
+            'sale_price' => 8500,
+            'status' => 'active',
+        ]);
+
+        $this->get(route('vending.tablet', ['token' => $machine->public_token]))
+            ->assertOk();
+
+        Livewire::actingAs($this->owner)
+            ->test(VendingIndex::class)
+            ->call('toggleStatus', $machine->id);
+
+        $this->assertSame('inactive', $machine->fresh()->status);
+
+        $this->get(route('vending.tablet', ['token' => $machine->public_token]))
+            ->assertNotFound();
     }
 
     public function test_new_machine_only_needs_kiosk_product_and_price(): void
