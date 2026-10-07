@@ -141,6 +141,15 @@ class MercadoPagoVendingController extends Controller
         ]);
 
         if ($inserted === 0) {
+            $existing = DB::table('mercadopago_webhook_events')
+                ->where('event_id', $eventId)
+                ->first();
+
+            if ($existing && !$existing->processed_at) {
+                ProcessMercadoPagoWebhookJob::dispatch($eventId);
+                return response()->json(['status' => 'retry_accepted'], 202);
+            }
+
             return response()->json(['status' => 'duplicate']);
         }
 
