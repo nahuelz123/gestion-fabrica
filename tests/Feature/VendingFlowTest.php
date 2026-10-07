@@ -9,15 +9,18 @@ use App\Models\Company;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Unit;
+use App\Models\User;
 use App\Models\VendingMachine;
 use App\Models\VendingPartner;
 use App\Models\VendingPaymentOrder;
 use App\Models\VendingSale;
 use App\Services\MercadoPagoVendingService;
+use App\Services\TelegramService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Mockery;
 use Tests\TestCase;
 
 class VendingFlowTest extends TestCase
@@ -275,6 +278,67 @@ class VendingFlowTest extends TestCase
         $this->assertSame(0.0, (float) $sale->commission_amount);
         $this->assertSame(0.0, (float) $sale->factory_amount);
         $this->assertSame(4, $this->machine->fresh()->loaded_units);
+    }
+
+    public function test_vending_sale_notification_goes_only_to_owners(): void
+    {
+        $owner = User::create([
+            'company_id' => $this->company->id,
+            'name' => 'Dueño',
+            'email' => 'owner-vending@test.local',
+            'password' => 'clave-segura-123',
+            'role' => 'owner',
+            'status' => 'active',
+            'telegram_chat_id' => 'owner-chat',
+        ]);
+        User::create([
+            'company_id' => $this->company->id,
+            'name' => 'Encargado',
+            'email' => 'manager-vending@test.local',
+            'password' => 'clave-segura-123',
+            'role' => 'manager',
+            'status' => 'active',
+            'telegram_chat_id' => 'manager-chat',
+        ]);
+
+        $paymentOrder = VendingPaymentOrder::create([
+            'company_id' => $this->company->id,
+            'vending_partner_id' => $this->partner->id,
+            'vending_machine_id' => $this->machine->id,
+            'external_reference' => 'VM-NOTIFY',
+            'mercadopago_order_id' => 'ORDER-NOTIFY',
+            'amount' => 10000,
+            'status' => 'processed',
+            'processed_at' => now(),
+        ]);
+
+        $sale = VendingSale::create([
+            'receipt_number' => 'VM-NOTIFY-1',
+            'company_id' => $this->company->id,
+            'vending_partner_id' => $this->partner->id,
+            'vending_machine_id' => $this->machine->id,
+            'product_id' => $this->product->id,
+            'vending_payment_order_id' => $paymentOrder->id,
+            'mercadopago_order_id' => 'ORDER-NOTIFY',
+            'external_reference' => 'VM-NOTIFY',
+            'gross_amount' => 10000,
+            'refunded_amount' => 0,
+            'commission_percent' => 0,
+            'commission_amount' => 0,
+            'factory_amount' => 10000,
+            'status' => 'approved',
+            'sold_at' => now(),
+        ]);
+
+        $telegram = Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')
+            ->once()
+            ->with('owner-chat', Mockery::on(fn ($message) => str_contains($message, 'Nueva venta de máquina')));
+        $telegram->shouldNotReceive('sendMessage')->with('manager-chat', Mockery::any());
+
+        (new NotifyVendingSaleJob($sale->id))->handle($telegram);
+
+        $this->assertTrue($owner->isOwner());
     }
 
     public function test_tablet_is_public_only_through_random_machine_token(): void
