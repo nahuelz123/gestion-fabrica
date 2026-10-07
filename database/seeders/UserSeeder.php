@@ -12,7 +12,15 @@ class UserSeeder extends Seeder
 {
     public function run(): void
     {
-        $company = Company::first();
+        $company = Company::firstOrFail();
+
+        $defaultPassword = (string) env('SEED_DEFAULT_PASSWORD', '');
+        if (app()->environment('production') && $defaultPassword === '') {
+            throw new \RuntimeException('UserSeeder no puede crear credenciales demo en producción. Definí SEED_DEFAULT_PASSWORD explícitamente o no ejecutes DatabaseSeeder.');
+        }
+        if ($defaultPassword === '') {
+            $defaultPassword = 'password';
+        }
 
         User::updateOrCreate(
             ['email' => 'admin@fabrica.com'],
@@ -20,7 +28,7 @@ class UserSeeder extends Seeder
                 'company_id' => $company->id,
                 'name' => 'Administrador',
                 'phone' => '1111111111',
-                'password' => 'password',
+                'password' => $defaultPassword,
                 'role' => UserRole::Owner,
                 'status' => UserStatus::Active,
             ]
