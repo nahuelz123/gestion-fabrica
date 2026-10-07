@@ -5,8 +5,20 @@
                 <div>
                     <h3 class="text-sm font-semibold text-red-800">⚠️ {{ $alerts->count() }} {{ $alerts->count() === 1 ? 'producto necesita atención' : 'productos necesitan atención' }}</h3>
                     <p class="text-xs text-red-700 mt-1">Hay stock en cero o por debajo del mínimo configurado.</p>
+                    <div class="mt-2 flex flex-wrap gap-2">
+                        @foreach($alerts->take(6) as $alert)
+                            <span class="inline-flex items-center rounded-full bg-white border border-red-200 px-2.5 py-1 text-xs font-medium text-red-800">
+                                {{ $alert->name }}:
+                                {{ rtrim(rtrim(number_format((float)($alert->total_stock ?? 0), 2, '.', ''), '0'), '.') }}
+                                {{ $alert->baseUnit->abbreviation ?? 'u' }}
+                            </span>
+                        @endforeach
+                        @if($alerts->count() > 6)
+                            <span class="text-xs text-red-700 self-center">+{{ $alerts->count() - 6 }} más</span>
+                        @endif
+                    </div>
                 </div>
-                <a href="{{ route('inventory.index') }}" wire:navigate class="text-sm font-medium text-red-700 underline">Revisar stock →</a>
+                <a href="{{ route('inventory.adjust', ['attention' => 1]) }}" wire:navigate class="text-sm font-medium text-red-700 underline whitespace-nowrap">Revisar y corregir →</a>
             </div>
         </div>
     @endif
