@@ -5,6 +5,7 @@ namespace App\Livewire\Users;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
@@ -89,7 +90,16 @@ class Form extends Component
         }
 
         if ($editing) {
+            $revokeSessions = !empty($data['password'])
+                || $data['status'] !== $editing->status->value
+                || $data['role'] !== $editing->role->value;
+
             $editing->update($payload);
+
+            if ($revokeSessions && $editing->id !== auth()->id()) {
+                DB::table('sessions')->where('user_id', $editing->id)->delete();
+            }
+
             $message = 'Usuario actualizado.';
         } else {
             User::create($payload);
