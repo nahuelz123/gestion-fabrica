@@ -32,6 +32,10 @@ Route::middleware(['auth', 'active'])->group(function () {
     });
 
     Route::middleware('can:owner-only')->group(function () {
+        Route::get('/usuarios', \App\Livewire\Users\Index::class)->name('users.index');
+        Route::get('/usuarios/crear', \App\Livewire\Users\Form::class)->name('users.create');
+        Route::get('/usuarios/{id}/editar', \App\Livewire\Users\Form::class)->name('users.edit');
+
         Route::get('/productos', Products\Index::class)->name('products.index');
         Route::get('/productos/crear', Products\Form::class)->name('products.create');
         Route::get('/productos/{id}/editar', Products\Form::class)->name('products.edit');
