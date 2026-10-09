@@ -21,36 +21,91 @@
 
     <div class="grid lg:grid-cols-2 gap-6">
         <div class="bg-white border rounded-xl overflow-hidden">
-            <table class="w-full text-sm">
-                <thead class="bg-gray-50"><tr><th class="p-3 text-left">Producto</th><th class="p-3 text-right">Sistema</th><th></th></tr></thead>
-                <tbody>
+            <div class="hidden sm:block">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50"><tr><th class="p-3 text-left">Producto</th><th class="p-3 text-right">Sistema</th><th></th></tr></thead>
+                    <tbody>
+                    @forelse($products as $product)
+                        <tr class="border-t hover:bg-gray-50">
+                            <td class="p-3 font-medium">
+                                {{ $product->name }}
+                                <div class="text-xs text-gray-400">{{ $product->internal_code }}</div>
+                                @if((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock))
+                                    <div class="text-xs text-red-600 font-semibold mt-1">
+                                        ⚠️ {{ (float)($product->current_stock ?? 0) <= 0 ? 'Sin stock' : 'Stock bajo' }}
+                                        @if($product->min_stock !== null && (float)$product->min_stock > 0)
+                                            · mínimo {{ rtrim(rtrim(number_format((float)$product->min_stock, 2, '.', ''), '0'), '.') }} {{ $product->baseUnit->abbreviation ?? '' }}
+                                        @endif
+                                    </div>
+                                @endif
+                            </td>
+                            <td class="p-3 text-right {{ ((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock)) ? 'text-red-700 font-bold' : '' }}">{{ number_format((float)($product->current_stock ?? 0),2,',','.') }} {{ $product->baseUnit->abbreviation ?? '' }}</td>
+                            <td class="p-3 text-right">
+                                <button
+                                    type="button"
+                                    wire:click="selectProduct({{ $product->id }})"
+                                    wire:loading.attr="disabled"
+                                    wire:target="selectProduct({{ $product->id }})"
+                                    class="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs disabled:opacity-50">
+                                    Contar
+                                </button>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="3" class="p-8 text-center text-gray-400">No encontré productos.</td></tr>
+                    @endforelse
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="sm:hidden divide-y divide-gray-100">
                 @forelse($products as $product)
-                    <tr class="border-t hover:bg-gray-50">
-                        <td class="p-3 font-medium">
-                            {{ $product->name }}
-                            <div class="text-xs text-gray-400">{{ $product->internal_code }}</div>
-                            @if((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock))
-                                <div class="text-xs text-red-600 font-semibold mt-1">
-                                    ⚠️ {{ (float)($product->current_stock ?? 0) <= 0 ? 'Sin stock' : 'Stock bajo' }}
-                                    @if($product->min_stock !== null && (float)$product->min_stock > 0)
-                                        · mínimo {{ rtrim(rtrim(number_format((float)$product->min_stock, 2, '.', ''), '0'), '.') }} {{ $product->baseUnit->abbreviation ?? '' }}
-                                    @endif
+                    @php
+                        $needsAttention = (float)($product->current_stock ?? 0) <= 0
+                            || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock);
+                    @endphp
+                    <div class="p-4">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="font-semibold text-gray-900 break-words">{{ $product->name }}</div>
+                                <div class="text-xs text-gray-400 mt-0.5">{{ $product->internal_code }}</div>
+                                @if($needsAttention)
+                                    <div class="text-xs text-red-600 font-semibold mt-1">
+                                        ⚠️ {{ (float)($product->current_stock ?? 0) <= 0 ? 'Sin stock' : 'Stock bajo' }}
+                                        @if($product->min_stock !== null && (float)$product->min_stock > 0)
+                                            · mínimo {{ rtrim(rtrim(number_format((float)$product->min_stock, 2, '.', ''), '0'), '.') }} {{ $product->baseUnit->abbreviation ?? '' }}
+                                        @endif
+                                    </div>
+                                @endif
+                            </div>
+                            <div class="shrink-0 text-right">
+                                <div class="text-xs text-gray-500">Sistema</div>
+                                <div class="font-bold {{ $needsAttention ? 'text-red-700' : 'text-gray-900' }}">
+                                    {{ number_format((float)($product->current_stock ?? 0),2,',','.') }} {{ $product->baseUnit->abbreviation ?? '' }}
                                 </div>
-                            @endif
-                        </td>
-                        <td class="p-3 text-right {{ ((float)($product->current_stock ?? 0) <= 0 || ($product->min_stock !== null && (float)$product->min_stock > 0 && (float)($product->current_stock ?? 0) <= (float)$product->min_stock)) ? 'text-red-700 font-bold' : '' }}">{{ number_format((float)($product->current_stock ?? 0),2,',','.') }} {{ $product->baseUnit->abbreviation ?? '' }}</td>
-                        <td class="p-3 text-right"><button wire:click="selectProduct({{ $product->id }})" class="bg-gray-900 text-white rounded-lg px-3 py-2 text-xs">Contar</button></td>
-                    </tr>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            wire:click="selectProduct({{ $product->id }})"
+                            wire:loading.attr="disabled"
+                            wire:target="selectProduct({{ $product->id }})"
+                            class="mt-4 w-full min-h-12 rounded-xl bg-gray-900 px-4 py-3 text-sm font-semibold text-white active:bg-gray-700 disabled:opacity-50 touch-manipulation">
+                            <span wire:loading.remove wire:target="selectProduct({{ $product->id }})">Contar stock real</span>
+                            <span wire:loading wire:target="selectProduct({{ $product->id }})">Abriendo…</span>
+                        </button>
+                    </div>
                 @empty
-                    <tr><td colspan="3" class="p-8 text-center text-gray-400">No encontré productos.</td></tr>
+                    <div class="p-8 text-center text-gray-400">No encontré productos.</div>
                 @endforelse
-                </tbody>
-            </table>
+            </div>
+
             <div class="p-3">{{ $products->links() }}</div>
         </div>
 
         @if($selectedProduct)
-            <div class="bg-white border rounded-xl p-6 h-fit lg:sticky lg:top-4">
+            <div id="stock-recount-panel" class="bg-white border rounded-xl p-4 sm:p-6 h-fit lg:sticky lg:top-4" x-data x-init="if (window.innerWidth < 1024) { setTimeout(() => $el.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80) }">
                 <div class="mb-5">
                     <p class="text-xs text-gray-400 uppercase font-semibold">Producto</p>
                     <h2 class="text-xl font-bold text-gray-900">{{ $selectedProduct->name }}</h2>
@@ -136,9 +191,12 @@
                     </div>
                 @elseif($adjustMode === 'set')
                     <label class="block text-sm font-medium text-gray-700">¿Cuánto contaste realmente?</label>
-                    <input wire:model="adjustQty" type="number" step="0.01" min="0.01" class="w-full border rounded-lg px-4 py-3 mt-1 text-lg" placeholder="Ej. 1250">
+                    <input wire:model="adjustQty" type="number" inputmode="decimal" step="0.01" min="0" class="w-full border rounded-lg px-4 py-4 mt-1 text-lg" placeholder="Ej. 1250">
                     @error('adjustQty')<p class="text-xs text-red-600 mt-1">{{ $message }}</p>@enderror
-                    <button wire:click="applyAdjustment" wire:loading.attr="disabled" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg py-3 mt-4 font-semibold">Guardar recuento</button>
+                    <button type="button" wire:click="applyAdjustment" wire:loading.attr="disabled" wire:target="applyAdjustment" class="w-full min-h-12 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white rounded-xl py-3 mt-4 font-semibold touch-manipulation">
+                        <span wire:loading.remove wire:target="applyAdjustment">Guardar recuento</span>
+                        <span wire:loading wire:target="applyAdjustment">Guardando…</span>
+                    </button>
                     <button wire:click="$set('adjustMode','add')" class="w-full text-sm text-gray-500 hover:text-gray-700 mt-4">Necesito hacer otra corrección →</button>
                 @else
                     <div class="border-t pt-4">
