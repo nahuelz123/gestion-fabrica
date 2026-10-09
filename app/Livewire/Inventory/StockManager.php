@@ -72,9 +72,14 @@ class StockManager extends Component
             'selectedProductId' => ['required', Rule::exists('products', 'id')->where(fn ($q) => $q->where('company_id', $companyId)->where('status', 'active'))],
             'warehouse_id' => ['required', Rule::exists('warehouses', 'id')->where(fn ($q) => $q->where('company_id', $companyId))],
             'adjustMode' => 'required|in:add,subtract,set',
-            'adjustQty' => 'required|numeric|min:0.01|max:999999999',
+            'adjustQty' => 'required|numeric|min:0|max:999999999',
             'adjustPresentationId' => 'nullable|integer',
         ]);
+
+        if ($this->adjustMode !== 'set' && (float) $this->adjustQty <= 0) {
+            $this->addError('adjustQty', 'La cantidad debe ser mayor a cero.');
+            return;
+        }
 
         $user = auth()->user();
         $product = Product::where('company_id', $companyId)
