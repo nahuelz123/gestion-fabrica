@@ -351,6 +351,89 @@ class BotAgentServiceTest extends TestCase
         $this->assertSame('jamón y queso',$completed['product_name']);
     }
 
+    public function test_exact_bacon_name_wins_over_hamburguesa_bacon(): void
+    {
+        $user=$this->user('owner');
+        $companyId=$user->company_id;
+        $unit=Unit::firstOrCreate(['abbreviation'=>'u'],['name'=>'Unidad','type'=>'count']);
+        $cat=ProductCategory::where('company_id',$companyId)->firstOrFail();
+
+        Product::create([
+            'company_id'=>$companyId,'category_id'=>$cat->id,'name'=>'Bacon',
+            'internal_code'=>'BACON-RAW-'.$companyId,'type'=>'raw_material',
+            'base_unit_id'=>$unit->id,'status'=>'active'
+        ]);
+        Product::create([
+            'company_id'=>$companyId,'category_id'=>$cat->id,'name'=>'Hamburguesa Bacon',
+            'internal_code'=>'BACON-FIN-'.$companyId,'type'=>'finished_product',
+            'base_unit_id'=>$unit->id,'status'=>'active'
+        ]);
+
+        $executor=new \App\Services\BotActionExecutor(
+            app(\App\Services\ProductService::class),
+            app(\App\Services\StockService::class),
+            app(\App\Services\ProductionCalculatorService::class),
+            app(\App\Services\ProductionOrderService::class),
+        );
+        $method=new ReflectionMethod(\App\Services\BotActionExecutor::class,'findProduct');
+        $method->setAccessible(true);
+        $result=$method->invoke($executor,$companyId,'bacon');
+
+        $this->assertTrue($result['success']);
+        $this->assertSame('Bacon',$result['product']->name);
+    }
+
+    public function test_ambiguity_can_be_listed_and_selected_without_losing_pending_action(): void
+    {
+        $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
+
+        $telegram=Mockery::mock(TelegramService::class);
+        $telegram->shouldReceive('sendMessage')->times(4);
+
+        $gemini=Mockery::mock(GeminiService::class);
+        $gemini->shouldReceive('analyzeConversation')->once()->andReturn([
+            'intent'=>'add_stock','reply'=>'','entities'=>[],
+            'action'=>['name'=>'add_stock','arguments'=>['product_name'=>'queso','quantity'=>10]],
+            'missing'=>[],'requires_confirmation'=>true,'confidence'=>1,
+        ]);
+
+        $preview=Mockery::mock(BotActionPreviewService::class);
+        $preview->shouldReceive('preview')->once()->andReturn('Voy a sumar 10 u de queso. ¿Confirmás?');
+        $preview->shouldReceive('preview')->once()->with(
+            $user,
+            Mockery::on(fn($action)=>($action['arguments']['product_name'] ?? null)==='Queso barra')
+        )->andReturn('Voy a sumar 10 u de Queso barra. ¿Confirmás?');
+
+        $executor=Mockery::mock(BotActionExecutor::class);
+        $executor->shouldReceive('execute')->once()->andReturn([
+            'success'=>false,
+            'message'=>"Encontré más de una opción para 'queso':\n1. Queso cheddar\n2. Queso barra\n\nDecime el nombre o el número y sigo con lo que estábamos haciendo.",
+            'candidates'=>['Queso cheddar','Queso barra'],
+        ]);
+
+        $this->app->instance(TelegramService::class,$telegram);
+        $this->app->instance(GeminiService::class,$gemini);
+        $this->app->instance(BotActionPreviewService::class,$preview);
+        $this->app->instance(BotActionExecutor::class,$executor);
+
+        $agent=app(BotAgentService::class);
+        $agent->processMessage($user,$chat,'agregame 10 de queso');
+        $agent->processMessage($user,$chat,'sí');
+
+        $conversation=AiConversation::where('user_id',$user->id)->firstOrFail();
+        $this->assertSame('collecting',$conversation->context['status']);
+        $this->assertSame(['Queso cheddar','Queso barra'],$conversation->context['disambiguation']['candidates']);
+
+        $agent->processMessage($user,$chat,'¿cuáles?');
+        $conversation->refresh();
+        $this->assertSame('collecting',$conversation->context['status']);
+
+        $agent->processMessage($user,$chat,'2');
+        $conversation->refresh();
+        $this->assertSame('ready_for_confirmation',$conversation->context['status']);
+        $this->assertSame('Queso barra',$conversation->pending_action['arguments']['product_name']);
+    }
+
     public function test_pending_action_can_only_be_claimed_once(): void
     {
         $user=$this->user('owner'); $chat=(string)$user->telegram_chat_id;
