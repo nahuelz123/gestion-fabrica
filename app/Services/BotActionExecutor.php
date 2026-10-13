@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\ProductAlias;
 use App\Models\Stock;
 use App\Models\User;
 use App\Models\Warehouse;
@@ -69,8 +70,35 @@ class BotActionExecutor
 
     private function findProduct(int $companyId, string $name): array
     {
+        $name = trim($name);
+        if ($name === '') {
+            return ['success' => false, 'message' => 'Decime qué producto querés usar.'];
+        }
+
+        // El lenguaje natural suele usar nombres cortos como "bacon". Si existe
+        // un producto con ese nombre exacto, no debe competir con "Hamburguesa bacon".
+        $exact = Product::where('company_id', $companyId)
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($name)])
+            ->first();
+        if ($exact) {
+            return ['success' => true, 'product' => $exact];
+        }
+
+        $alias = ProductAlias::where('company_id', $companyId)
+            ->whereRaw('LOWER(alias) = ?', [mb_strtolower($name)])
+            ->with('product')
+            ->first();
+        if ($alias?->product) {
+            return ['success' => true, 'product' => $alias->product];
+        }
+
         $products = Product::where('company_id', $companyId)
-            ->where('name', 'like', "%{$name}%")
+            ->where(function ($query) use ($name) {
+                $query->where('name', 'like', "%{$name}%")
+                    ->orWhereHas('aliases', fn ($aliases) => $aliases->where('alias', 'like', "%{$name}%"));
+            })
+            ->orderBy('name')
+            ->limit(12)
             ->get();
 
         if ($products->count() === 0) {
@@ -78,7 +106,15 @@ class BotActionExecutor
         }
 
         if ($products->count() > 1) {
-            return ['success' => false, 'message' => "Encontré varios productos que coinciden con '{$name}'. ¿Cuál querés?"];
+            $options = $products->values()->map(
+                fn ($product, $index) => ($index + 1) . '. ' . $product->name
+            )->implode("\n");
+
+            return [
+                'success' => false,
+                'message' => "Encontré más de una opción para '{$name}':\n{$options}\n\nDecime el nombre o el número y sigo con lo que estábamos haciendo.",
+                'candidates' => $products->pluck('name')->values()->all(),
+            ];
         }
 
         return ['success' => true, 'product' => $products->first()];
