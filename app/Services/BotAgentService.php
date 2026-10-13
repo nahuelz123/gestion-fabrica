@@ -367,6 +367,25 @@ class BotAgentService
         }
 
         if ($selected===null) {
+            $ordinalMap=[
+                'primero'=>0,'primera'=>0,
+                'segundo'=>1,'segunda'=>1,
+                'tercero'=>2,'tercera'=>2,
+                'cuarto'=>3,'cuarta'=>3,
+            ];
+            $plain=$this->normalizeFactoryProductName($textNorm);
+            foreach ($ordinalMap as $word=>$index) {
+                if (preg_match('/\\b'.preg_quote($word,'/').'\\b/u',$plain) && isset($candidates[$index])) {
+                    $selected=$candidates[$index];
+                    break;
+                }
+            }
+            if ($selected===null && preg_match('/\\b(ultimo|ultima)\\b/u',$plain) && $candidates) {
+                $selected=$candidates[array_key_last($candidates)];
+            }
+        }
+
+        if ($selected===null) {
             $normalized=$this->normalizeFactoryProductName($textNorm);
             foreach ($candidates as $candidate) {
                 $candidateNorm=$this->normalizeFactoryProductName($candidate);
