@@ -58,9 +58,16 @@ class FlexibleBotActionExecutor extends BotActionExecutor
         ];
 
         if (!empty($args['product_name'])) {
+            $stockActions = [
+                'get_stock','register_stock','adjust_stock','set_stock',
+                'add_stock','remove_stock',
+            ];
+
             $product = in_array($name,$productionActions,true)
                 ? $this->resolveFinishedProduct($companyId, (string) $args['product_name'])
-                : $this->resolveProduct($companyId, (string) $args['product_name']);
+                : (in_array($name,$stockActions,true)
+                    ? $this->resolveInventoryProduct($companyId, (string) $args['product_name'])
+                    : $this->resolveProduct($companyId, (string) $args['product_name']));
 
             if ($product) {
                 $args['product_name'] = $product->name;
@@ -467,6 +474,48 @@ class FlexibleBotActionExecutor extends BotActionExecutor
     private function resolveFinishedProduct(int $companyId, string $input): ?Product
     {
         return $this->resolveProductQuery($companyId, $input, 'finished_product');
+    }
+
+    /**
+     * En operaciones de inventario, frases cortas como "bacon", "cheddar" o
+     * "lomito" normalmente se refieren al insumo, no a la hamburguesa terminada.
+     * Si el usuario escribe el nombre exacto de un producto terminado
+     * ("Hamburguesa bacon"), la coincidencia exacta sigue ganando.
+     */
+    private function resolveInventoryProduct(int $companyId, string $input): ?Product
+    {
+        $input = trim($input);
+        if ($input === '') return null;
+
+        $exact = Product::where('company_id', $companyId)
+            ->whereRaw('LOWER(name) = ?', [mb_strtolower($input)])
+            ->first();
+        if ($exact) return $exact;
+
+        $exactAliasProducts = ProductAlias::query()
+            ->where('product_aliases.company_id', $companyId)
+            ->whereRaw('LOWER(alias) = ?', [mb_strtolower($input)])
+            ->with('product')
+            ->get()
+            ->pluck('product')
+            ->filter()
+            ->unique('id')
+            ->values();
+
+        if ($exactAliasProducts->count() === 1) {
+            return $exactAliasProducts->first();
+        }
+        if ($exactAliasProducts->count() > 1) {
+            $raw = $exactAliasProducts->first(
+                fn ($product) => ($product->type instanceof \BackedEnum ? $product->type->value : (string)$product->type) === 'raw_material'
+            );
+            if ($raw) return $raw;
+        }
+
+        $raw = $this->resolveProductQuery($companyId, $input, 'raw_material');
+        if ($raw) return $raw;
+
+        return $this->resolveProductQuery($companyId, $input, null);
     }
 
     private function resolveProduct(int $companyId, string $input): ?Product
