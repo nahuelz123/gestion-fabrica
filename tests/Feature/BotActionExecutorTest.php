@@ -152,6 +152,55 @@ class BotActionExecutorTest extends TestCase
         $this->assertSame(0,ProductionOrder::where('company_id',$d['a']->id)->count());
     }
 
+    public function test_stock_language_prefers_raw_bacon_over_finished_bacon(): void
+    {
+        $d=$this->data();
+
+        $raw=Product::create([
+            'company_id'=>$d['a']->id,
+            'category_id'=>$d['ca']->id,
+            'name'=>'Bacon ahumado',
+            'internal_code'=>'BACON-RAW-2',
+            'type'=>'raw_material',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+
+        Product::create([
+            'company_id'=>$d['a']->id,
+            'category_id'=>$d['ca']->id,
+            'name'=>'Hamburguesa bacon',
+            'internal_code'=>'BACON-FIN-2',
+            'type'=>'finished_product',
+            'base_unit_id'=>$d['unit']->id,
+            'status'=>'active',
+        ]);
+
+        $raw->aliases()->create([
+            'company_id'=>$d['a']->id,
+            'alias'=>'bacon',
+        ]);
+
+        $result=app(BotActionExecutor::class)->execute(
+            $d['owner'],
+            '111',
+            [
+                'name'=>'add_stock',
+                'arguments'=>[
+                    'product_name'=>'bacon',
+                    'quantity'=>1000,
+                ],
+            ],
+            []
+        );
+
+        $this->assertTrue($result['success'],$result['message'] ?? 'Falló el ingreso de bacon.');
+        $this->assertSame(
+            1000.0,
+            (float)Stock::where('company_id',$d['a']->id)->where('product_id',$raw->id)->sum('quantity')
+        );
+    }
+
     public function test_owner_can_create_and_update_product_with_current_schema(): void
     {
         $d=$this->data(); $executor=app(BotActionExecutor::class);
