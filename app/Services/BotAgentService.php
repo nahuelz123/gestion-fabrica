@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\AiConversation;
+use App\Models\Product;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -24,6 +25,18 @@ class BotAgentService
         $context = $this->addRecentMessage($context,'user',$text);
         $textNorm = trim(mb_strtolower($text));
         $currentStatus = $context['status'] ?? 'idle';
+
+        if ($currentStatus === 'collecting' && !empty($context['disambiguation']) && !empty($context['pending_action'])) {
+            $handled=$this->handleDisambiguation($context,$textNorm);
+            if ($handled) {
+                $context=$handled['context'];
+                $reply=$handled['reply'];
+                $context=$this->addRecentMessage($context,'assistant',$reply);
+                $this->saveContext($conversation,$context);
+                $this->telegramService->sendMessage($chatId,$reply);
+                return;
+            }
+        }
 
         $cancelWords = ['no','cancelar','cancelá','cancela','dejá','deja','mejor no'];
         if (in_array($textNorm,$cancelWords,true) && in_array($currentStatus,['collecting','ready_for_confirmation'],true)) {
@@ -47,13 +60,32 @@ class BotAgentService
                 $this->telegramService->sendMessage($chatId,$reply); return;
             }
             $result=app(BotActionExecutor::class)->execute($user,$chatId,$pendingAction,$context);
-            $reply=$result['message']; $context['status']=$result['success'] ? 'completed' : 'idle';
-            if ($result['success']) { $context['last_completed_action']=$pendingAction; $context['pending_action']=null; }
+            $reply=$result['message'];
+            if ($result['success']) {
+                $context['status']='completed';
+                $context['last_completed_action']=$pendingAction;
+                $context['pending_action']=null;
+                unset($context['disambiguation']);
+            } elseif (!empty($result['candidates']) && is_array($result['candidates'])) {
+                $context['status']='collecting';
+                $context['pending_action']=$pendingAction;
+                $context['disambiguation']=[
+                    'field'=>'product_name',
+                    'candidates'=>array_values($result['candidates']),
+                ];
+            } else {
+                $context['status']='idle';
+            }
             $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
             $this->telegramService->sendMessage($chatId,$reply); return;
         }
 
-        $analysis=$this->geminiService->analyzeConversation($text,$context);
+        // El catálogo se agrega sólo al prompt de IA: ayuda a entender "bacon",
+        // "el cheddar", "la hamburguesa de pollo", etc. sin guardar cientos de
+        // nombres dentro del contexto persistente.
+        $aiContext=$context;
+        $aiContext['catalog']=$this->catalogHint($user->company_id);
+        $analysis=$this->geminiService->analyzeConversation($text,$aiContext);
         $analysis=$this->repairProductionLanguage($analysis,$textNorm);
         $analysis=$this->repairStockMutationLanguage($analysis,$textNorm);
 
@@ -314,6 +346,75 @@ class BotAgentService
             'doce' => 12.0,
             default => 0.0,
         };
+    }
+
+    private function handleDisambiguation(array $context,string $textNorm): ?array
+    {
+        $data=is_array($context['disambiguation'] ?? null) ? $context['disambiguation'] : [];
+        $candidates=array_values(array_filter($data['candidates'] ?? [], 'is_string'));
+        if (!$candidates) return null;
+
+        if (preg_match('/\\b(cuales|cuáles|lista|opciones|mostrame|decime cuales|decime cuáles)\\b/iu',$textNorm)) {
+            $lines=[];
+            foreach ($candidates as $index=>$candidate) $lines[]=($index+1).'. '.$candidate;
+            return ['context'=>$context,'reply'=>"Estas son las opciones que encontré:\n".implode("\n",$lines)."\n\nDecime el nombre o el número."];
+        }
+
+        $selected=null;
+        if (preg_match('/^(?:el |la |opcion |opción )?(\\d+)$/iu',$textNorm,$match)) {
+            $index=(int)$match[1]-1;
+            if (isset($candidates[$index])) $selected=$candidates[$index];
+        }
+
+        if ($selected===null) {
+            $normalized=$this->normalizeFactoryProductName($textNorm);
+            foreach ($candidates as $candidate) {
+                $candidateNorm=$this->normalizeFactoryProductName($candidate);
+                if ($normalized===$candidateNorm
+                    || str_contains($candidateNorm,$normalized)
+                    || str_contains($normalized,$candidateNorm)) {
+                    if ($selected!==null && $selected!==$candidate) return null;
+                    $selected=$candidate;
+                }
+            }
+        }
+
+        if ($selected===null) return null;
+
+        $action=is_array($context['pending_action'] ?? null) ? $context['pending_action'] : null;
+        if (!$action) return null;
+        $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+        $args['product_name']=$selected;
+        $action['arguments']=$args;
+        $context['pending_action']=$action;
+        $context['status']='ready_for_confirmation';
+        unset($context['disambiguation']);
+
+        return [
+            'context'=>$context,
+            'reply'=>$this->previewService->preview(auth()->user(),$action),
+        ];
+    }
+
+    private function catalogHint(int $companyId): array
+    {
+        return Product::where('company_id',$companyId)
+            ->where('status','active')
+            ->with('aliases:id,product_id,alias')
+            ->orderBy('type')
+            ->orderBy('name')
+            ->limit(120)
+            ->get(['id','name','type'])
+            ->map(function ($product) {
+                $type=$product->type instanceof \BackedEnum ? $product->type->value : (string)$product->type;
+                return [
+                    'name'=>$product->name,
+                    'type'=>$type,
+                    'aliases'=>$product->aliases->pluck('alias')->take(8)->values()->all(),
+                ];
+            })
+            ->values()
+            ->all();
     }
 
     private function claimPendingAction(AiConversation $conversation): ?array
