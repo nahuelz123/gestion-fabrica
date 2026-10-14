@@ -49,8 +49,8 @@ class GeminiService
     {
         $primary=trim((string)config('services.gemini.model','gemini-3-flash-preview')) ?: 'gemini-3-flash-preview';
         $fallback=trim((string)config('services.gemini.fallback_model',''));
-        $plan=[['model'=>$primary,'delay_ms'=>0],['model'=>$primary,'delay_ms'=>1200],['model'=>$primary,'delay_ms'=>2800]];
-        if ($fallback!=='' && $fallback!==$primary) $plan[]=['model'=>$fallback,'delay_ms'=>800];
+        $plan=[['model'=>$primary,'delay_ms'=>0],['model'=>$primary,'delay_ms'=>900]];
+        if ($fallback!=='' && $fallback!==$primary) $plan[]=['model'=>$fallback,'delay_ms'=>400];
         $last=null;
         foreach ($plan as $index=>$step) {
             if ($step['delay_ms']>0 && !app()->environment('testing')) usleep($step['delay_ms']*1000);
@@ -65,7 +65,7 @@ class GeminiService
 
     private function postToGemini(string $url,string $apiKey,array $payload): array
     {
-        $response=Http::withToken($apiKey)->acceptJson()->asJson()->connectTimeout(10)->timeout(45)->post($url,$payload);
+        $response=Http::withToken($apiKey)->acceptJson()->asJson()->connectTimeout(5)->timeout(16)->post($url,$payload);
         $json=$response->json();
         return ['status'=>$response->status(),'successful'=>$response->successful(),'body'=>$response->body(),'json'=>is_array($json)?$json:[]];
     }
@@ -73,7 +73,7 @@ class GeminiService
     private function getSystemInstruction(): string
     {
         return <<<'PROMPT'
-Sos el asistente virtual de una fábrica. Hablás en español argentino, entendés lenguaje natural y usás el contexto de la conversación.
+Sos el asistente conversacional de Rapi Burguer, una fábrica de hamburguesas. Hablás en español argentino, con un tono natural, claro y breve. Entendés preguntas cotidianas y seguimientos usando la conversación previa.
 Tu trabajo es INTERPRETAR. Laravel valida y ejecuta. Nunca inventes SQL ni ejecutes cambios por tu cuenta.
 
 Reglas:
@@ -94,10 +94,16 @@ Reglas:
 13. Convención de Rapi Burguer: si el encargado dice "usamos/abrimos 8 piezas y quedó media pieza", 8 es la cantidad de piezas tomadas/abiertas y de la última sobró 0.5; por lo tanto el consumo efectivo es 7.5 piezas y deben quedar 0.5 disponibles. Igual para cuartos. En el reply aclaralo antes de confirmar. Si no podés identificar qué ingrediente tuvo el sobrante, pedí aclaración y no inventes.
 14. Para register_production, si informa consumos reales, ponelos en actual_consumptions y preservá presentation_name (pieza, barra, caja, etc.). Los insumos no mencionados quedan según receta.
 15. Diferenciá insumos de productos terminados por intención. "Agregame 1000 de bacon" habla del insumo Bacon si existe; "quiero hacer 3 carros de bacon" habla del producto terminado de bacon. No conviertas una entrada de stock en una producción ni al revés.
-16. No seas robótico. Podés responder preguntas cortas y seguimientos usando el historial, siempre sin ejecutar cambios fuera de las acciones permitidas.
+16. Respondé saludos y preguntas generales naturalmente con intent unknown y action null. No confundas una consulta con una instrucción de actualizar datos.
+17. Nunca inventes existencias, ventas, compras, costos, vencimientos, proveedores ni movimientos. Para datos del negocio elegí una acción de lectura para que Laravel consulte MySQL; no agregues números inventados en reply.
+18. Resumen de la fábrica => get_business_summary. Ventas => get_sales_summary. Compras => get_purchases_summary. Proveedores => get_suppliers. Hoy equivale a days=1, una semana a days=7, un mes a days=30 (por defecto).
+19. Entradas y salidas recientes => get_stock_movements. Vencimientos => get_expiring_products. Stock insuficiente => get_low_stock. Catálogo/inventario total => get_stock con product_name=all.
+20. Si hay una acción pendiente y dicen 'me equivoqué, eran 25' o 'en realidad 25', corresponde corregir la acción, mostrarla de nuevo y pedir confirmación. Nunca ejecutar un cambio con un mensaje ambiguo.
+21. El dueño puede consultar compras, proveedores y ventas; el encargado sólo inventario y producción. Laravel verifica estos permisos.
+22. No prometas acciones que no estén implementadas. Si no es posible consultar algo desde el bot, aclaralo sin inventar resultados.
 
 Acciones permitidas exclusivamente:
-create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production, unknown.
+create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, get_sales_summary, get_purchases_summary, get_business_summary, get_suppliers, unknown.
 PROMPT;
     }
 
@@ -119,7 +125,7 @@ PROMPT;
 
     private function validateAndFormatResponse(array $parsed): array
     {
-        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','unknown'];
+        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','unknown'];
         $intent=in_array($parsed['intent'] ?? '', $valid,true) ? $parsed['intent'] : 'unknown';
         $action=null;
         if (isset($parsed['action']) && is_array($parsed['action'])) {
