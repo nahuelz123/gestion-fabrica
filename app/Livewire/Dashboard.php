@@ -17,6 +17,7 @@ class Dashboard extends Component
         // productos en memoria cuando el catálogo crezca.
         $alerts = Product::query()
             ->where('company_id', $companyId)
+            ->where('status', 'active')
             ->with('baseUnit:id,abbreviation')
             ->withSum('stocks as total_stock', 'quantity')
             ->havingRaw('COALESCE(total_stock, 0) <= 0 OR (min_stock IS NOT NULL AND min_stock > 0 AND COALESCE(total_stock, 0) <= min_stock)')
