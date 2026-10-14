@@ -552,7 +552,7 @@ class BotAgentService
     {
         $name=$action['name'] ?? ''; $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $last=is_array($context['last_read_action'] ?? null) ? $context['last_read_action'] : []; $lastArgs=is_array($last['arguments'] ?? null) ? $last['arguments'] : [];
-        if (empty($args['product_name']) && in_array($name,['get_stock','get_recipe','get_max_production','calculate_production','check_production','get_missing_inputs','get_stock_movements'],true)) {
+        if (empty($args['product_name']) && in_array($name,['get_stock','get_recipe','get_max_production','calculate_production','check_production','get_missing_inputs'],true)) {
             $previousName = $lastArgs['product_name'] ?? ($context['last_product_name'] ?? null);
             $completed = $context['last_completed_action']['arguments']['product_name'] ?? null;
             if (!in_array(mb_strtolower((string) $previousName), ['all','todos','todo'], true)) {
@@ -560,6 +560,10 @@ class BotAgentService
             } elseif ($completed) {
                 $args['product_name'] = $completed;
             }
+        }
+        if ($name === 'get_stock_movements' && empty($args['product_name'])
+            && preg_match('/\\b(ese|esa|mismo|misma|ese producto|del producto)\\b/iu', $textNorm)) {
+            $args['product_name'] = $lastArgs['product_name'] ?? ($context['last_product_name'] ?? null);
         }
         $isContinuation=str_starts_with($textNorm,'y ') || str_contains($textNorm,'además') || str_contains($textNorm,'ademas') || str_contains($textNorm,'sumale') || str_contains($textNorm,'agregale') || str_contains($textNorm,'agregá') || str_contains($textNorm,'agrega');
         if (in_array($name,['get_max_production','plan_production'],true) && $isContinuation) {
