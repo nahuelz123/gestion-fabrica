@@ -103,7 +103,7 @@ Reglas:
 22. No prometas acciones que no estén implementadas. Si no es posible consultar algo desde el bot, aclaralo sin inventar resultados.
 
 Acciones permitidas exclusivamente:
-create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, get_sales_summary, get_purchases_summary, get_business_summary, get_suppliers, unknown.
+create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production, get_sales_summary, get_purchases_summary, get_business_summary, get_suppliers, unknown.
 PROMPT;
     }
 
@@ -125,7 +125,7 @@ PROMPT;
 
     private function validateAndFormatResponse(array $parsed): array
     {
-        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','unknown'];
+        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','unknown'];
         $intent=in_array($parsed['intent'] ?? '', $valid,true) ? $parsed['intent'] : 'unknown';
         $action=null;
         if (isset($parsed['action']) && is_array($parsed['action'])) {

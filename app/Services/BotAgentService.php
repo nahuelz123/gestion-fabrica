@@ -122,9 +122,9 @@ class BotAgentService
             $this->telegramService->sendMessage($chatId,$reply); return;
         }
 
-        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
+        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
         $status='idle'; $actionToExecute=null; $actionName=$action['name'] ?? ''; $previewReply=null;
-        $supportedMutations = ['create_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production'];
+        $supportedMutations = ['create_product','update_product','create_recipe','update_recipe','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production'];
         if ($action && !in_array($actionName, [...$readActions, ...$supportedMutations], true)) {
             $reply = 'Esa operación todavía no está disponible desde Telegram. Podés gestionarla en la aplicación web.';
             $context['status'] = 'idle';
@@ -447,7 +447,7 @@ class BotAgentService
         $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $args['product_name']=$selected;
         $action['arguments']=$args;
-        $readActions = ['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
+        $readActions = ['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
         if (in_array($action['name'] ?? '', $readActions, true)) {
             $result = app(BotActionExecutor::class)->execute($user, (string) $user->telegram_chat_id, $action, $context);
             $context['status'] = $result['success'] ? 'completed' : 'idle';
