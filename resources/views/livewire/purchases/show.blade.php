@@ -1,5 +1,5 @@
 <div>
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
         <div>
             <h1 class="text-2xl font-bold text-gray-800">
                 Compra #{{ $purchase->id }}
@@ -58,7 +58,7 @@
         </div>
     @endif
 
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    <div data-table-scroll tabindex="0" role="region" aria-label="Detalle de artículos comprados" class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
         <div class="px-5 py-4 border-b border-gray-200 bg-gray-50">
             <h2 class="text-lg font-medium text-gray-900">Ítems ({{ $purchase->items->count() }})</h2>
         </div>

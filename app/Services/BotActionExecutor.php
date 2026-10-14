@@ -250,6 +250,15 @@ class BotActionExecutor
         return ['success' => true, 'message' => trim($msg)];
     }
 
+    /**
+     * Telegram registers production in the first configured warehouse.
+     * Reports and simulations must use that same warehouse.
+     */
+    private function productionWarehouseId(int $companyId): int
+    {
+        return (int) Warehouse::where('company_id', $companyId)->orderBy('id')->value('id');
+    }
+
     private function executeCalculateProduction(int $companyId, array $args): array
     {
         $name = $args['product_name'] ?? null;
@@ -267,7 +276,7 @@ class BotActionExecutor
         $product = $result['product'];
         
         try {
-            $calc = $this->calculatorService->calculateRequirements($product, $quantity);
+            $calc = $this->calculatorService->calculateRequirements($product, $quantity, $this->productionWarehouseId($companyId));
             $msg = "Para producir {$quantity} u de {$product->name} necesitás:\n";
             foreach ($calc['items'] as $item) {
                 $msg .= $this->formatItemLine($item);
@@ -330,7 +339,7 @@ class BotActionExecutor
                 $simulatedDescriptions[] = $this->formatNumber($quantity) . ' ' . ($addition['presentation_name'] ?? $ingredient->presentation) . ' de ' . $ingredient->name;
             }
 
-            $calc = $this->calculatorService->calculateMaxProducible($product, $stockAdditions);
+            $calc = $this->calculatorService->calculateMaxProducible($product, $stockAdditions, $this->productionWarehouseId($companyId));
             $units = (int) $calc['max_units'];
             $carros = intdiv($units, 288);
             $remainingAfterCars = $units % 288;
@@ -376,7 +385,7 @@ class BotActionExecutor
         $product = $result['product'];
         
         try {
-            $calc = $this->calculatorService->calculateRequirements($product, $quantity);
+            $calc = $this->calculatorService->calculateRequirements($product, $quantity, $this->productionWarehouseId($companyId));
             if ($calc['can_produce']) {
                 return ['success' => true, 'message' => "✅ Hay stock suficiente para producir {$quantity} u de {$product->name}."];
             } else {
@@ -415,7 +424,7 @@ class BotActionExecutor
         $product = $result['product'];
         
         try {
-            $calc = $this->calculatorService->calculateRequirements($product, $quantity);
+            $calc = $this->calculatorService->calculateRequirements($product, $quantity, $this->productionWarehouseId($companyId));
             if ($calc['can_produce']) {
                 return ['success' => true, 'message' => "✅ No te falta nada. Hay stock suficiente para producir {$quantity} u de {$product->name}."];
             } else {
@@ -624,7 +633,7 @@ class BotActionExecutor
 
         try {
             $result = $this->productionOrderService->registerProduction(
-                $user, $product, $quantity, $actualConsumptions, Channel::Telegram
+                $user, $product, $quantity, $actualConsumptions, Channel::Telegram, $this->productionWarehouseId($user->company_id)
             );
 
             $msg = "✅ Producción registrada: {$quantity} u de {$product->name} (Orden #{$result['order']->id}).";

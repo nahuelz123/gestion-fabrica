@@ -9,3 +9,18 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* Touch, small-screen and accessibility support. */
+[x-cloak] { display: none !important; }
+@layer base {
+    html { min-width: 320px; }
+    body { overflow-x: clip; }
+    img, video, svg { max-width: 100%; }
+    input, textarea, select { max-width: 100%; }
+    :focus-visible { outline: 2px solid #b91c1c; outline-offset: 2px; }
+}
+[data-table-scroll] { scrollbar-width: thin; overscroll-behavior-x: contain; }
+@media (max-width: 639px) { [data-table-scroll] table { min-width: 42rem; } }
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}

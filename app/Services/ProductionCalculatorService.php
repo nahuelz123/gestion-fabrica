@@ -5,19 +5,22 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\ProductPresentation;
 use App\Models\Stock;
+use App\Models\Warehouse;
+use Illuminate\Database\Eloquent\Builder;
 use Exception;
 
 class ProductionCalculatorService
 {
-    public function calculateRequirements(Product $product, float $targetQuantity): array
+    public function calculateRequirements(Product $product, float $targetQuantity, ?int $warehouseId = null): array
     {
         if (!is_finite($targetQuantity) || $targetQuantity <= 0) throw new Exception('La cantidad a producir debe ser mayor a 0.');
+        $this->validateWarehouse($product, $warehouseId);
         $recipe = $product->recipe()->with('items.product.baseUnit')->first();
         if (!$recipe) throw new Exception("El producto '{$product->name}' no tiene una receta configurada.");
         if ($recipe->yield_quantity <= 0) throw new Exception('El rendimiento de la receta debe ser mayor a 0.');
         $multiplier = $targetQuantity / $recipe->yield_quantity;
         $ingredientIds = $recipe->items->pluck('product_id')->all();
-        $stocks = Stock::where('company_id',$product->company_id)->whereIn('product_id',$ingredientIds)
+        $stocks = $this->usableStocks($product, $ingredientIds, $warehouseId)
             ->selectRaw('product_id, SUM(quantity) as total_stock')->groupBy('product_id')->pluck('total_stock','product_id');
         $presentations = ProductPresentation::whereIn('product_id',$ingredientIds)->where('is_purchase_default',true)->get()->keyBy('product_id');
         $items = []; $canProduce = true;
@@ -45,12 +48,14 @@ class ProductionCalculatorService
         return ['can_produce'=>$canProduce,'items'=>$items];
     }
 
-    public function calculateMaxProducible(Product $product, array $stockAdditions = []): array
+    public function calculateMaxProducible(Product $product, array $stockAdditions = [], ?int $warehouseId = null): array
     {
+        $this->validateWarehouse($product, $warehouseId);
         $recipe = $product->recipe()->with('items.product')->first();
         if (!$recipe || $recipe->yield_quantity <= 0 || $recipe->items->isEmpty()) throw new Exception("El producto '{$product->name}' no tiene una receta válida configurada.");
         $ingredientIds = $recipe->items->pluck('product_id')->all();
-        $stocks = Stock::where('company_id',$product->company_id)->whereIn('product_id',$ingredientIds)->selectRaw('product_id, SUM(quantity) as total_stock')->groupBy('product_id')->pluck('total_stock','product_id');
+        $stocks = $this->usableStocks($product, $ingredientIds, $warehouseId)
+            ->selectRaw('product_id, SUM(quantity) as total_stock')->groupBy('product_id')->pluck('total_stock','product_id');
         $maxUnits = INF; $limitingIngredient = null;
         foreach ($recipe->items as $item) {
             if ($item->product->company_id !== $product->company_id) throw new Exception('La receta contiene un insumo de otra empresa.');
@@ -62,5 +67,32 @@ class ProductionCalculatorService
         }
         if ($maxUnits === INF) $maxUnits = 0;
         return ['max_units'=>(int)$maxUnits,'limiting_ingredient'=>$limitingIngredient];
+    }
+    /**
+     * Only active, non-expired lots are usable in production. Historical stock
+     * remains visible in inventory for auditing, recounts and disposal.
+     */
+    private function usableStocks(Product $product, array $ingredientIds, ?int $warehouseId): Builder
+    {
+        return Stock::query()
+            ->where('company_id', $product->company_id)
+            ->whereIn('product_id', $ingredientIds)
+            ->when($warehouseId !== null, fn ($query) => $query->where('warehouse_id', $warehouseId))
+            ->where(function ($query) {
+                $query->whereNull('lot_id')->orWhereHas('lot', function ($lotQuery) {
+                    $lotQuery->where('status', 'active')
+                        ->where(function ($dates) {
+                            $dates->whereNull('expiration_date')
+                                ->orWhereDate('expiration_date', '>=', now()->toDateString());
+                        });
+                });
+            });
+    }
+
+    private function validateWarehouse(Product $product, ?int $warehouseId): void
+    {
+        if ($warehouseId !== null && !Warehouse::where('company_id', $product->company_id)->whereKey($warehouseId)->exists()) {
+            throw new Exception('El depósito seleccionado no pertenece a esta empresa.');
+        }
     }
 }

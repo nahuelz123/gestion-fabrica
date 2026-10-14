@@ -2,8 +2,10 @@
 
 namespace App\Livewire\Production;
 
+use App\Enums\Channel;
 use App\Enums\ProductType;
 use App\Models\Product;
+use App\Models\Warehouse;
 use App\Services\ProductionCalculatorService;
 use App\Services\ProductionOrderService;
 use Exception;
@@ -16,6 +18,8 @@ use Livewire\Component;
 class Calculator extends Component
 {
     public string $product_id = '';
+    public string $warehouse_id = '';
+    public string $calculatedFingerprint = '';
     public string $target_quantity = '1';
     public string $carros = '';
     public string $bandejas = '';
@@ -27,6 +31,8 @@ class Calculator extends Component
     public function mount(): void
     {
         Gate::authorize('manage-production');
+        $warehouse = Warehouse::where('company_id', auth()->user()->company_id)->orderBy('id')->first();
+        $this->warehouse_id = $warehouse ? (string) $warehouse->id : '';
     }
 
     private function rules(): array
@@ -43,6 +49,7 @@ class Calculator extends Component
                         ->where('status', 'active')
                 ),
             ],
+            'warehouse_id' => ['required', Rule::exists('warehouses', 'id')->where(fn ($query) => $query->where('company_id', $companyId))],
             'target_quantity' => 'required|numeric|min:0.01|max:999999999',
             'carros' => 'nullable|numeric|min:0|max:999999',
             'bandejas' => 'nullable|numeric|min:0|max:999999',
@@ -74,6 +81,7 @@ class Calculator extends Component
         $this->errorMessage = null;
         $this->successMessage = null;
         $this->result = null;
+        $this->calculatedFingerprint = '';
         $this->actual_consumptions = [];
 
         $product = Product::where('company_id', auth()->user()->company_id)
@@ -82,7 +90,8 @@ class Calculator extends Component
             ->findOrFail($this->product_id);
 
         try {
-            $this->result = $calculator->calculateRequirements($product, (float) $this->target_quantity);
+            $this->result = $calculator->calculateRequirements($product, (float) $this->target_quantity, (int) $this->warehouse_id);
+            $this->calculatedFingerprint = implode(':', [$this->product_id, $this->warehouse_id, $this->target_quantity]);
 
             // Precargamos el consumo teórico para que el encargado sólo tenga que
             // tocar los valores que realmente fueron distintos durante el turno.
@@ -102,6 +111,11 @@ class Calculator extends Component
         Gate::authorize('manage-production');
         $this->resolveTargetQuantity();
         $this->validate($this->rules());
+
+        if (!$this->result || $this->calculatedFingerprint !== implode(':', [$this->product_id, $this->warehouse_id, $this->target_quantity])) {
+            $this->errorMessage = 'Cambiaste el producto, el depósito o la cantidad. Volvé a comprobar antes de confirmar.';
+            return;
+        }
 
         $product = Product::where('company_id', auth()->user()->company_id)
             ->where('type', ProductType::FinishedProduct)
@@ -133,10 +147,13 @@ class Calculator extends Component
                 auth()->user(),
                 $product,
                 (float) $this->target_quantity,
-                $actualConsumptions
+                $actualConsumptions,
+                Channel::Web,
+                (int) $this->warehouse_id
             );
 
             $this->result = null;
+            $this->calculatedFingerprint = '';
             $this->product_id = '';
             $this->target_quantity = '1';
             $this->carros = '';
@@ -163,6 +180,7 @@ class Calculator extends Component
             ->orderBy('name')
             ->get();
 
-        return view('livewire.production.calculator', ['products' => $products]);
+        $warehouses = Warehouse::where('company_id', auth()->user()->company_id)->orderBy('name')->get(['id', 'name']);
+        return view('livewire.production.calculator', compact('products', 'warehouses'));
     }
 }

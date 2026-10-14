@@ -39,6 +39,7 @@ class ProductionOrderService
         float $quantity,
         array $actualConsumptions = [],
         Channel $channel = Channel::Web,
+        ?int $warehouseId = null,
     ): array {
         if (!is_finite($quantity) || $quantity <= 0) {
             throw new InvalidArgumentException('La cantidad producida debe ser mayor a 0.');
@@ -47,10 +48,16 @@ class ProductionOrderService
             throw new InvalidArgumentException('No tenés permiso para registrar producción.');
         }
 
-        return DB::transaction(function () use ($user, $finishedProduct, $quantity, $actualConsumptions, $channel) {
+        return DB::transaction(function () use ($user, $finishedProduct, $quantity, $actualConsumptions, $channel, $warehouseId) {
             $companyId = $user->company_id;
             $user = User::where('company_id', $companyId)->whereKey($user->id)->lockForUpdate()->firstOrFail();
+            if (!$user->isActive() || !$user->canManageProduction()) {
+                throw new InvalidArgumentException('No tenés permiso para registrar producción.');
+            }
             $finishedProduct = Product::where('company_id', $companyId)->whereKey($finishedProduct->id)->lockForUpdate()->firstOrFail();
+            if (!$finishedProduct->isActive()) {
+                throw new InvalidArgumentException('No se puede producir un producto inactivo.');
+            }
             if ($finishedProduct->type !== ProductType::FinishedProduct) {
                 throw new InvalidArgumentException('El producto seleccionado no es un producto final.');
             }
@@ -58,7 +65,9 @@ class ProductionOrderService
                 throw new InvalidArgumentException('El producto final requiere vencimiento pero no tiene días de vida útil configurados.');
             }
 
-            $warehouse = Warehouse::where('company_id', $companyId)->orderBy('id')->firstOrFail();
+            $warehouse = Warehouse::where('company_id', $companyId)
+                ->when($warehouseId !== null, fn ($query) => $query->whereKey($warehouseId))
+                ->orderBy('id')->firstOrFail();
             $recipe = $finishedProduct->recipe()->with('items.product')->first();
             if (!$recipe || (float) $recipe->yield_quantity <= 0 || $recipe->items->isEmpty()) {
                 throw new Exception("El producto '{$finishedProduct->name}' no tiene una receta válida configurada.");
@@ -165,6 +174,11 @@ class ProductionOrderService
             ->whereNotNull('stock.lot_id')
             ->where('stock.quantity', '>', 0)
             ->join('stock_lots', 'stock.lot_id', '=', 'stock_lots.id')
+            ->where('stock_lots.status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('stock_lots.expiration_date')
+                    ->orWhereDate('stock_lots.expiration_date', '>=', now()->toDateString());
+            })
             ->orderByRaw('stock_lots.expiration_date IS NULL ASC')
             ->orderBy('stock_lots.expiration_date')
             ->orderBy('stock_lots.entry_date')
