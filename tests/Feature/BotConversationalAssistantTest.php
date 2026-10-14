@@ -168,7 +168,7 @@ class BotConversationalAssistantTest extends TestCase
         $executor = app(BotActionExecutor::class);
         $denied = $executor->execute($d['manager'], '5555', ['name' => 'get_business_summary', 'arguments' => ['days' => 7]], []);
         $this->assertFalse($denied['success']);
-        $this->assertStringContainsString('permiso', $denied['message']);
+        $this->assertStringContainsString('rol de encargado', $denied['message']);
 
         $owner = $executor->execute($d['owner'], '4444', ['name' => 'get_business_summary', 'arguments' => ['days' => 7]], []);
         $this->assertTrue($owner['success']);
