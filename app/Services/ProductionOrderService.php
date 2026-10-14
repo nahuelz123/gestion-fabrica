@@ -174,6 +174,11 @@ class ProductionOrderService
             ->whereNotNull('stock.lot_id')
             ->where('stock.quantity', '>', 0)
             ->join('stock_lots', 'stock.lot_id', '=', 'stock_lots.id')
+            ->where('stock_lots.status', 'active')
+            ->where(function ($query) {
+                $query->whereNull('stock_lots.expiration_date')
+                    ->orWhereDate('stock_lots.expiration_date', '>=', now()->toDateString());
+            })
             ->orderByRaw('stock_lots.expiration_date IS NULL ASC')
             ->orderBy('stock_lots.expiration_date')
             ->orderBy('stock_lots.entry_date')

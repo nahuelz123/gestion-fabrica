@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Warehouse;
 use App\Services\StockService;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
@@ -51,9 +52,9 @@ class StockManager extends Component
     public function selectProduct(int $productId): void
     {
         Gate::authorize('manage-stock');
-        Product::where('company_id', auth()->user()->company_id)->findOrFail($productId);
+        $product = Product::where('company_id', auth()->user()->company_id)
+            ->where('status', 'active')->findOrFail($productId);
         $this->selectedProductId = $productId;
-        $product = Product::where('company_id', auth()->user()->company_id)->findOrFail($productId);
         $this->adjustMode = $product->requires_lot ? 'add' : 'set';
         $this->adjustQty = '';
         $this->adjustPresentationId = '';
@@ -128,18 +129,31 @@ class StockManager extends Component
             if (!$pres) { $this->addError('adjustPresentationId', 'La presentación no corresponde al producto seleccionado.'); return; }
             $presentationId = $pres->id; $presentationQty = $qty; $qty *= (float) $pres->conversion_factor;
         }
-        $currentQty = (float) Stock::where('company_id', $companyId)->where('product_id', $product->id)->where('warehouse_id', $warehouse->id)->sum('quantity');
         try {
             if ($this->adjustMode === 'set') {
-                $diff = $qty - $currentQty;
-                if (abs($diff) < 0.001) { $this->successMessage = "El stock de {$product->name} en {$warehouse->name} ya estaba en {$qty} u."; return; }
-                $stockService->registerMovement([
-                    'company_id' => $companyId, 'product_id' => $product->id, 'warehouse_id' => $warehouse->id,
-                    'type' => $diff > 0 ? MovementType::AdjustmentIn : MovementType::AdjustmentOut,
-                    'quantity_base' => abs($diff), 'user_id' => $user->id, 'channel' => Channel::Web,
-                    'reason' => 'Recuento físico de stock',
-                ]);
-                $this->successMessage = "Listo. {$product->name} quedó en {$qty} u en {$warehouse->name}.";
+                // A recount must read stock and apply its delta under the same lock.
+                // StockService reuses this product lock inside the transaction.
+                $this->successMessage = DB::transaction(function () use ($companyId, $product, $warehouse, $qty, $stockService, $user) {
+                    Product::where('company_id', $companyId)->whereKey($product->id)
+                        ->lockForUpdate()->firstOrFail();
+
+                    $currentQty = (float) Stock::where('company_id', $companyId)
+                        ->where('product_id', $product->id)->where('warehouse_id', $warehouse->id)
+                        ->sum('quantity');
+                    $diff = $qty - $currentQty;
+                    if (abs($diff) < 0.001) {
+                        return "El stock de {$product->name} en {$warehouse->name} ya estaba en {$qty} u.";
+                    }
+
+                    $stockService->registerMovement([
+                        'company_id' => $companyId, 'product_id' => $product->id, 'warehouse_id' => $warehouse->id,
+                        'type' => $diff > 0 ? MovementType::AdjustmentIn : MovementType::AdjustmentOut,
+                        'quantity_base' => abs($diff), 'user_id' => $user->id, 'channel' => Channel::Web,
+                        'reason' => 'Recuento físico de stock',
+                    ]);
+
+                    return "Listo. {$product->name} quedó en {$qty} u en {$warehouse->name}.";
+                });
             } else {
                 $type = $this->adjustMode === 'subtract' ? MovementType::AdjustmentOut : MovementType::AdjustmentIn;
                 $lotData = [];
