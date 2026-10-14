@@ -3,6 +3,12 @@
 namespace App\Services;
 
 use App\Models\Product;
+use App\Models\Purchase;
+use App\Models\StockLot;
+use App\Models\StockMovement;
+use App\Models\ProductionOrder;
+use App\Models\VendingSale;
+use App\Models\Supplier;
 use App\Models\ProductAlias;
 use App\Models\Stock;
 use App\Models\User;
@@ -36,12 +42,21 @@ class BotActionExecutor
         $actionName = $action['name'] ?? null;
         $args = $action['arguments'] ?? [];
         $companyId = $user->company_id;
+        if (!$user->isActive() || !$user->canUseBotAction($actionName)) {
+            return ['success' => false, 'message' => 'No tenés permiso para esa consulta u operación.'];
+        }
 
         try {
             return DB::transaction(function () use ($actionName, $args, $companyId, $user) {
                 return match ($actionName) {
                     'get_stock' => $this->executeGetStock($companyId, $args),
                     'get_low_stock' => $this->executeGetLowStock($companyId),
+                    'get_expiring_products' => $this->executeGetExpiringProducts($companyId, $args),
+                    'get_stock_movements' => $this->executeGetStockMovements($companyId, $args),
+                    'get_sales_summary' => $this->executeGetSalesSummary($companyId, $args),
+                    'get_purchases_summary' => $this->executeGetPurchasesSummary($companyId, $args),
+                    'get_business_summary' => $this->executeGetBusinessSummary($companyId, $args),
+                    'get_suppliers' => $this->executeGetSuppliers($companyId),
                     'create_product' => $this->executeCreateProduct($companyId, $args),
                     'register_stock' => $this->executeRegisterStock($companyId, $user->id, $args),
                     'adjust_stock' => $this->executeAdjustStock($companyId, $user->id, $args),
@@ -123,11 +138,25 @@ class BotActionExecutor
     private function executeGetStock(int $companyId, array $args): array
     {
         $name = $args['product_name'] ?? null;
-        if (!$name) {
-            return ['success' => false, 'message' => '¿De qué producto querés consultar el stock?'];
+        if (!$name || in_array(mb_strtolower(trim((string) $name)), ['all', 'todo', 'todos', 'inventario', 'general'], true)) {
+            $products = Product::query()->where('company_id', $companyId)
+                ->where('status', 'active')->with('baseUnit:id,abbreviation')
+                ->withSum('stocks as available_stock', 'quantity')
+                ->orderBy('name')->limit(35)->get();
+            if ($products->isEmpty()) return ['success' => true, 'message' => 'No hay productos activos registrados.'];
+            $lines = ['Stock registrado (todos los depósitos):'];
+            foreach ($products as $product) {
+                $lines[] = '- ' . $product->name . ': ' .
+                    $this->formatNumber((float) ($product->available_stock ?? 0)) .
+                    ' ' . ($product->baseUnit?->abbreviation ?? 'u');
+            }
+            if (Product::where('company_id', $companyId)->where('status', 'active')->count() > 35) {
+                $lines[] = 'Mostrando los primeros 35 productos. Pedime uno por nombre para ver su detalle.';
+            }
+            return ['success' => true, 'message' => implode("\n", $lines)];
         }
 
-        $result = $this->findProduct($companyId, $name);
+        $result = $this->findProduct($companyId, (string) $name);
         if (!$result['success']) {
             return $result;
         }
@@ -158,10 +187,132 @@ class BotActionExecutor
 
     private function executeGetLowStock(int $companyId): array
     {
-        // El proyecto actualmente no tiene regla clara configurada en BD para low stock.
+        $products = Product::query()->where('company_id', $companyId)
+            ->where('status', 'active')->with('baseUnit:id,abbreviation')
+            ->withSum('stocks as stock_total', 'quantity')
+            ->havingRaw('COALESCE(stock_total, 0) <= 0 OR (min_stock IS NOT NULL AND min_stock > 0 AND COALESCE(stock_total, 0) <= min_stock)')
+            ->orderBy('name')->limit(25)->get();
+
+        if ($products->isEmpty()) return ['success' => true, 'message' => 'No encontré productos activos sin stock o por debajo de su mínimo.'];
+        $lines = ['Productos sin stock o con stock bajo:'];
+        foreach ($products as $product) {
+            $lines[] = '- ' . $product->name . ': ' . $this->formatNumber((float) ($product->stock_total ?? 0)) . ' ' .
+                ($product->baseUnit?->abbreviation ?? 'u') .
+                ((float) $product->min_stock > 0 ? ' (mínimo: ' . $this->formatNumber((float) $product->min_stock) . ')' : ' (sin stock)');
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function readPeriod(array $args): int
+    {
+        return max(1, min(365, (int) ($args['days'] ?? 30)));
+    }
+
+    private function executeGetExpiringProducts(int $companyId, array $args): array
+    {
+        $days = max(0, min(365, (int) ($args['days'] ?? 7)));
+        $stocks = Stock::query()->where('company_id', $companyId)->where('quantity', '>', 0)
+            ->whereNotNull('lot_id')->whereHas('lot', function ($query) use ($days) {
+                $query->whereNotNull('expiration_date')
+                    ->whereDate('expiration_date', '<=', now()->addDays($days)->toDateString());
+            })
+            ->with(['product:id,name', 'lot:id,lot_code,expiration_date,status', 'warehouse:id,name'])
+            ->orderBy('product_id')->limit(30)->get();
+        if ($stocks->isEmpty()) return ['success' => true, 'message' => "No hay lotes con existencia vencidos o por vencer en los próximos {$days} días."];
+        $lines = ["Lotes vencidos o que vencen dentro de {$days} días:"];
+        foreach ($stocks as $stock) {
+            $expired = $stock->lot->expiration_date->lt(now()->startOfDay());
+            $lines[] = '- ' . ($stock->product?->name ?? 'Producto') . ' | lote ' . $stock->lot->lot_code .
+                ' | ' . ($expired ? 'VENCIDO ' : 'vence ') . $stock->lot->expiration_date->format('d/m/Y') .
+                ' | ' . $this->formatNumber((float) $stock->quantity) . ' u | ' . ($stock->warehouse?->name ?? 'Depósito');
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function executeGetStockMovements(int $companyId, array $args): array
+    {
+        $limit = max(1, min(20, (int) ($args['limit'] ?? 10)));
+        $query = StockMovement::where('company_id', $companyId)
+            ->with(['product:id,name', 'warehouse:id,name', 'user:id,name', 'lot:id,lot_code']);
+        if (!empty($args['product_name']) && !in_array(mb_strtolower((string) $args['product_name']), ['all', 'todo', 'todos'], true)) {
+            $resolved = $this->findProduct($companyId, (string) $args['product_name']);
+            if (!$resolved['success']) return $resolved;
+            $query->where('product_id', $resolved['product']->id);
+        }
+        if (!empty($args['days'])) $query->whereDate('created_at', '>=', now()->subDays($this->readPeriod($args))->toDateString());
+        $movements = $query->latest('created_at')->limit($limit)->get();
+        if ($movements->isEmpty()) return ['success' => true, 'message' => 'No hay movimientos que coincidan con esa consulta.'];
+        $lines = ['Últimos movimientos registrados:'];
+        foreach ($movements as $movement) {
+            $amount = (float) $movement->quantity_base;
+            $lines[] = '- ' . $movement->created_at?->format('d/m H:i') . ' | ' .
+                ($movement->product?->name ?? 'Producto') . ' | ' . $movement->type->label() .
+                ' ' . ($amount > 0 ? '+' : '') . $this->formatNumber($amount) . ' u' .
+                ' | ' . ($movement->warehouse?->name ?? 'Depósito') .
+                ' | ' . ($movement->user?->name ?? 'Sistema');
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function executeGetSalesSummary(int $companyId, array $args): array
+    {
+        $days = $this->readPeriod($args);
+        $base = VendingSale::where('company_id', $companyId)
+            ->whereDate('sold_at', '>=', now()->subDays($days - 1)->toDateString());
+        $approved = (clone $base)->whereIn('status', ['approved', 'partially_refunded']);
+        $count = (clone $approved)->count();
+        $net = (float) (clone $approved)->sum('gross_amount') - (float) (clone $approved)->sum('refunded_amount');
+        $refunds = (clone $base)->whereIn('status', ['refunded', 'partially_refunded'])->count();
+        return ['success' => true, 'message' => "Ventas de máquinas en los últimos {$days} días (incluido hoy): {$count} ventas válidas. Importe neto registrado: $" .
+            number_format(max(0, $net), 2, ',', '.') . ". Ventas con devolución total o parcial: {$refunds}. Estos datos corresponden a ventas registradas, no a una conciliación bancaria."];
+    }
+
+    private function executeGetPurchasesSummary(int $companyId, array $args): array
+    {
+        $days = $this->readPeriod($args);
+        $query = Purchase::where('company_id', $companyId)
+            ->whereDate('purchase_date', '>=', now()->subDays($days - 1)->toDateString());
+        $confirmed = (clone $query)->where('status', 'confirmed');
+        $confirmedIds = (clone $confirmed)->select('id');
+        $total = (float) \App\Models\PurchaseItem::whereIn('purchase_id', $confirmedIds)
+            ->selectRaw('COALESCE(SUM(quantity * unit_cost), 0) as total')->value('total');
+        $confirmedCount = (clone $confirmed)->count();
+        $draftCount = (clone $query)->where('status', 'draft')->count();
         return [
-            'success' => false,
-            'message' => 'La alerta de stock mínimo todavía no está configurada en el sistema.'
+            'success' => true,
+            'message' => "Compras en los últimos {$days} días (incluido hoy): {$confirmedCount} confirmadas, {$draftCount} borradores. " .
+                'Importe estimado de compras confirmadas: ARS ' . number_format($total, 2, ',', '.') . '.',
+        ];
+    }
+
+    private function executeGetSuppliers(int $companyId): array
+    {
+        $suppliers = Supplier::where('company_id', $companyId)->orderBy('name')
+            ->limit(30)->get(['name', 'phone', 'email']);
+        if ($suppliers->isEmpty()) {
+            return ['success' => true, 'message' => 'No hay proveedores cargados.'];
+        }
+        $lines = ['Proveedores registrados:'];
+        foreach ($suppliers as $supplier) {
+            $contact = array_filter([$supplier->phone, $supplier->email]);
+            $lines[] = '- ' . $supplier->name . ($contact ? ' — ' . implode(' / ', $contact) : '');
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function executeGetBusinessSummary(int $companyId, array $args): array
+    {
+        $days = $this->readPeriod($args);
+        $products = Product::where('company_id', $companyId)->where('status', 'active')->count();
+        $orders = ProductionOrder::where('company_id', $companyId)
+            ->whereDate('created_at', '>=', now()->subDays($days - 1)->toDateString())
+            ->where('status', 'completed')->count();
+        $sales = $this->executeGetSalesSummary($companyId, ['days' => $days])['message'];
+        $purchases = $this->executeGetPurchasesSummary($companyId, ['days' => $days])['message'];
+
+        return [
+            'success' => true,
+            'message' => "Resumen de la fábrica: {$products} productos activos y {$orders} órdenes de producción completadas en los últimos {$days} días.\n{$purchases}\n{$sales}",
         ];
     }
 

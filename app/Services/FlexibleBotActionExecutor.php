@@ -45,6 +45,9 @@ class FlexibleBotActionExecutor extends BotActionExecutor
         }
 
         if ($name === 'get_stock_movements') {
+            if (!empty($args['product_name']) || !empty($args['days'])) {
+                return parent::execute($user, $chatId, $action, $context);
+            }
             return $this->executeGetStockMovements($companyId, (int) ($args['limit'] ?? 10));
         }
 
@@ -123,7 +126,7 @@ class FlexibleBotActionExecutor extends BotActionExecutor
 
     private function executeGetAllStock(int $companyId): array
     {
-        $products = Product::where('company_id', $companyId)
+        $products = Product::where('company_id', $companyId)->where('status', 'active')
             ->with(['baseUnit:id,abbreviation', 'presentations:id,product_id,name,conversion_factor,is_purchase_default'])
             ->withSum('stocks as total_stock', 'quantity')
             ->orderBy('type')
@@ -189,13 +192,13 @@ class FlexibleBotActionExecutor extends BotActionExecutor
 
     private function executeGetLowStock(int $companyId): array
     {
-        $withoutMinimum = Product::where('company_id', $companyId)
+        $withoutMinimum = Product::where('company_id', $companyId)->where('status', 'active')
             ->where(function ($query) {
                 $query->whereNull('min_stock')->orWhere('min_stock', '<=', 0);
             })
             ->count();
 
-        $products = Product::where('company_id', $companyId)
+        $products = Product::where('company_id', $companyId)->where('status', 'active')
             ->with('baseUnit:id,abbreviation')
             ->withSum('stocks as total_stock', 'quantity')
             ->havingRaw('COALESCE(total_stock, 0) <= 0 OR (min_stock IS NOT NULL AND min_stock > 0 AND COALESCE(total_stock, 0) <= min_stock)')

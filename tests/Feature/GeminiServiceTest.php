@@ -51,12 +51,11 @@ class GeminiServiceTest extends TestCase
         Http::fake(['*'=>Http::sequence()
             ->push(['error'=>'busy'],503)
             ->push(['error'=>'busy'],503)
-            ->push(['error'=>'busy'],503)
             ->push($this->ok(['intent'=>'get_stock','reply'=>'ok','entities'=>[],'action'=>['name'=>'get_stock','arguments'=>['product_name'=>'all']],'missing'=>[],'requires_confirmation'=>false,'confidence'=>1]),200)]);
         $result=app(GeminiService::class)->analyzeConversation('stock');
-        $this->assertSame('get_stock',$result['intent']); Http::assertSentCount(4);
+        $this->assertSame('get_stock',$result['intent']); Http::assertSentCount(3);
         $models=collect(Http::recorded())->map(fn($pair)=>$pair[0]->data()['model'] ?? null)->values()->all();
-        $this->assertSame(['gemini-primary','gemini-primary','gemini-primary','gemini-fallback'],$models);
+        $this->assertSame(['gemini-primary','gemini-primary','gemini-fallback'],$models);
     }
 
     public function test_invalid_json_falls_back_safely(): void

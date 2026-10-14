@@ -58,6 +58,35 @@ class BotActionPreviewService
             return implode("\n", $lines);
         }
 
+        if ($name === 'update_product') {
+            $product = (string) ($args['product_name'] ?? $args['name'] ?? 'el producto');
+            $changes = [];
+            foreach (['new_name' => 'nombre', 'min_stock' => 'mínimo de stock', 'shelf_life_days' => 'vida útil (días)', 'presentation_name' => 'presentación'] as $field => $label) {
+                if (isset($args[$field]) && $args[$field] !== '') {
+                    $changes[] = '- ' . $label . ': ' . (string) $args[$field];
+                }
+            }
+            if (!$changes) return 'No identifico qué dato querés cambiar. Decime el campo y el valor.';
+            return "Voy a actualizar {$product}:\n" . implode("\n", $changes) . "\n¿Confirmás?";
+        }
+
+        if (in_array($name, ['create_recipe', 'update_recipe'], true)) {
+            $product = (string) ($args['product_name'] ?? 'el producto final');
+            $yield = (float) ($args['yield_quantity'] ?? 0);
+            $items = is_array($args['items'] ?? null) ? $args['items'] : [];
+            if ($yield <= 0 || !$items) {
+                return 'Para editar la receta necesito rendimiento e ingredientes con sus cantidades.';
+            }
+            $lines = ["Voy a guardar la receta de {$product} para un rendimiento de {$yield} unidades:"];
+            foreach (array_slice($items, 0, 30) as $item) {
+                if (!is_array($item)) continue;
+                $lines[] = '- ' . (string) ($item['product_name'] ?? 'Insumo sin identificar') . ': ' .
+                    (string) ($item['quantity'] ?? '?') . ' ' . (string) ($item['presentation_name'] ?? 'u');
+            }
+            $lines[] = '¿Confirmás?';
+            return implode("\n", $lines);
+        }
+
         if ($name === 'create_product') {
             $product = $args['name'] ?? 'el producto';
             $presentation = $args['presentation'] ?? null;

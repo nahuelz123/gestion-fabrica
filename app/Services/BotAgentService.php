@@ -38,6 +38,18 @@ class BotAgentService
             }
         }
 
+        // Una corrección de cantidad en una operación pendiente NO la confirma.
+        // Sólo actualiza el borrador y vuelve a mostrar la vista previa.
+        if ($currentStatus === 'ready_for_confirmation' && !empty($context['pending_action'])) {
+            $correction = $this->handlePendingQuantityCorrection($user, $context, $textNorm);
+            if ($correction !== null) {
+                $context = $this->addRecentMessage($correction['context'], 'assistant', $correction['reply']);
+                $this->saveContext($conversation, $context);
+                $this->telegramService->sendMessage($chatId, $correction['reply']);
+                return;
+            }
+        }
+
         $cancelWords = ['no','cancelar','cancelá','cancela','dejá','deja','mejor no'];
         if (in_array($textNorm,$cancelWords,true) && in_array($currentStatus,['collecting','ready_for_confirmation'],true)) {
             $context['status']='cancelled'; $context['pending_action']=null;
@@ -64,6 +76,7 @@ class BotAgentService
             if ($result['success']) {
                 $context['status']='completed';
                 $context['last_completed_action']=$pendingAction;
+                $this->rememberUsefulReferences($context, $pendingAction);
                 $context['pending_action']=null;
                 unset($context['disambiguation']);
             } elseif (!empty($result['candidates']) && is_array($result['candidates'])) {
@@ -90,9 +103,11 @@ class BotAgentService
         $analysis=$this->repairStockMutationLanguage($analysis,$textNorm);
 
         if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
-            $context['status']='idle';
-            $context['pending_action']=null;
+            $pending = $currentStatus === 'ready_for_confirmation' && !empty($context['pending_action']);
+            $context['status'] = $pending ? 'ready_for_confirmation' : 'idle';
+            if (!$pending) $context['pending_action']=null;
             $reply=$analysis['reply'] ?? 'Tuve un problema procesando eso. Probá nuevamente.';
+            if ($pending) $reply .= "\n\nTenés una operación pendiente. Podés decir «sí», «cancelar» o corregirla antes de confirmar.";
             $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
             $this->telegramService->sendMessage($chatId,$reply); return;
         }
@@ -107,8 +122,28 @@ class BotAgentService
             $this->telegramService->sendMessage($chatId,$reply); return;
         }
 
-        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production'];
+        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
         $status='idle'; $actionToExecute=null; $actionName=$action['name'] ?? ''; $previewReply=null;
+        $supportedMutations = ['create_product','update_product','create_recipe','update_recipe','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production'];
+        if ($action && !in_array($actionName, [...$readActions, ...$supportedMutations], true)) {
+            $reply = 'Esa operación todavía no está disponible desde Telegram. Podés gestionarla en la aplicación web.';
+            $context['status'] = 'idle';
+            $context['pending_action'] = null;
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $reply);
+            return;
+        }
+        // Una acción de escritura interpretada con poca certeza no debe llegar a la confirmación.
+        if ($action && in_array($actionName, $supportedMutations, true) && (float) ($analysis['confidence'] ?? 1) < 0.55) {
+            $reply = 'Para no registrar algo incorrecto, ¿podés confirmarme el producto y la cantidad exacta?';
+            $context['status'] = 'collecting';
+            $context['pending_action'] = null;
+            $context = $this->addRecentMessage($context, 'assistant', $reply);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $reply);
+            return;
+        }
         if ($action && in_array($actionName,$readActions,true)) { $status='confirmed'; $actionToExecute=$action; }
         elseif ($action) { $status='ready_for_confirmation'; $context['pending_action']=$action; $previewReply=$this->previewService->preview($user,$action); }
         elseif (!empty($analysis['missing'])) $status='collecting';
@@ -121,6 +156,13 @@ class BotAgentService
             if ($result['success']) {
                 $context['status']='completed'; $context['pending_action']=null; $context['last_read_action']=$actionToExecute;
                 $this->rememberUsefulReferences($context,$actionToExecute);
+            } elseif (!empty($result['candidates']) && is_array($result['candidates'])) {
+                $context['status'] = 'collecting';
+                $context['pending_action'] = $actionToExecute;
+                $context['disambiguation'] = [
+                    'field' => 'product_name',
+                    'candidates' => array_values($result['candidates']),
+                ];
             } else $context['status']='idle';
         }
         $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
@@ -405,6 +447,19 @@ class BotAgentService
         $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $args['product_name']=$selected;
         $action['arguments']=$args;
+        $readActions = ['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
+        if (in_array($action['name'] ?? '', $readActions, true)) {
+            $result = app(BotActionExecutor::class)->execute($user, (string) $user->telegram_chat_id, $action, $context);
+            $context['status'] = $result['success'] ? 'completed' : 'idle';
+            $context['pending_action'] = null;
+            if ($result['success']) {
+                $context['last_read_action'] = $action;
+                $this->rememberUsefulReferences($context, $action);
+            }
+            unset($context['disambiguation']);
+            return ['context' => $context, 'reply' => $result['message']];
+        }
+
         $context['pending_action']=$action;
         $context['status']='ready_for_confirmation';
         unset($context['disambiguation']);
@@ -412,6 +467,63 @@ class BotAgentService
         return [
             'context'=>$context,
             'reply'=>$this->previewService->preview($user,$action),
+        ];
+    }
+
+
+    /**
+     * Aplica correcciones inequívocas sin pedirle al LLM que reconstruya
+     * cantidades ni confiar un cambio irreversible a una frase ambigua.
+     */
+    private function handlePendingQuantityCorrection(User $user, array $context, string $text): ?array
+    {
+        $pattern='/^(?:no[,\\s]+)?(?:(?:me\\s+equivoqu[eé]|en\\s+realidad|mejor|eran?|son|es|pon[eé]|cambi[aá](?:lo)?(?:\\s+a)?|quise\\s+decir)[,\\s]*)+(?<quantity>\\d+(?:[.,]\\d+)?)\\s*(?<unit>carros?|bandejas?|unidades?|u)?[.!]?$/iu';
+        if (!preg_match($pattern, $text, $match)) return null;
+
+        $action = $context['pending_action'];
+        if (!is_array($action)) return null;
+        $quantity = (float) str_replace(',', '.', (string) $match['quantity']);
+        if (!is_finite($quantity) || $quantity <= 0) {
+            return ['context'=>$context, 'reply'=>'La cantidad debe ser mayor a cero. La operación sigue pendiente sin cambios.'];
+        }
+
+        $args = is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
+        $items = is_array($args['items'] ?? null) ? $args['items'] : [];
+        if (count($items) > 1) {
+            return ['context'=>$context, 'reply'=>'Hay varios productos en la operación. ¿A cuál le querés cambiar la cantidad? Decime producto y cantidad. Todavía no modifiqué nada.'];
+        }
+
+        $unit = mb_strtolower((string) ($match['unit'] ?? ''));
+        if (($action['name'] ?? '') === 'register_production') {
+            if ($unit === '' && (!empty($args['carros']) || !empty($args['bandejas']))) {
+                return ['context'=>$context, 'reply'=>'¿La cantidad corregida es en carros, bandejas o hamburguesas? No cambié nada todavía.'];
+            }
+            if (str_starts_with($unit, 'carro')) {
+                $args['carros'] = $quantity;
+                $args['bandejas'] = 0;
+                $args['quantity'] = ProductionOrderService::toHamburguesas($quantity, 0);
+            } elseif (str_starts_with($unit, 'bandeja')) {
+                $args['carros'] = 0;
+                $args['bandejas'] = $quantity;
+                $args['quantity'] = ProductionOrderService::toHamburguesas(0, $quantity);
+            } else {
+                unset($args['carros'], $args['bandejas']);
+                $args['quantity'] = $quantity;
+            }
+        } elseif (count($items) === 1) {
+            $args['items'][0]['quantity'] = $quantity;
+        } elseif (array_key_exists('quantity', $args)) {
+            $args['quantity'] = $quantity;
+        } else {
+            return ['context'=>$context, 'reply'=>'No encontré una cantidad única para corregir. Decime el producto y la cantidad nueva.'];
+        }
+
+        $action['arguments'] = $args;
+        $context['pending_action'] = $action;
+        $context['status'] = 'ready_for_confirmation';
+        return [
+            'context' => $context,
+            'reply' => 'Corregido. ' . ($this->previewService->preview($user, $action) ?? '¿Confirmás esta operación?'),
         ];
     }
 
@@ -460,7 +572,19 @@ class BotAgentService
     {
         $name=$action['name'] ?? ''; $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $last=is_array($context['last_read_action'] ?? null) ? $context['last_read_action'] : []; $lastArgs=is_array($last['arguments'] ?? null) ? $last['arguments'] : [];
-        if (empty($args['product_name']) && in_array($name,['get_max_production','calculate_production','check_production','get_missing_inputs'],true)) $args['product_name']=$lastArgs['product_name'] ?? ($context['last_product_name'] ?? null);
+        if (empty($args['product_name']) && in_array($name,['get_stock','get_recipe','get_max_production','calculate_production','check_production','get_missing_inputs'],true)) {
+            $previousName = $lastArgs['product_name'] ?? ($context['last_product_name'] ?? null);
+            $completed = $context['last_completed_action']['arguments']['product_name'] ?? null;
+            if (!in_array(mb_strtolower((string) $previousName), ['all','todos','todo'], true)) {
+                $args['product_name'] = $previousName ?: $completed;
+            } elseif ($completed) {
+                $args['product_name'] = $completed;
+            }
+        }
+        if ($name === 'get_stock_movements' && empty($args['product_name'])
+            && preg_match('/\\b(ese|esa|mismo|misma|ese producto|del producto)\\b/iu', $textNorm)) {
+            $args['product_name'] = $lastArgs['product_name'] ?? ($context['last_product_name'] ?? null);
+        }
         $isContinuation=str_starts_with($textNorm,'y ') || str_contains($textNorm,'además') || str_contains($textNorm,'ademas') || str_contains($textNorm,'sumale') || str_contains($textNorm,'agregale') || str_contains($textNorm,'agregá') || str_contains($textNorm,'agrega');
         if (in_array($name,['get_max_production','plan_production'],true) && $isContinuation) {
             $previous=is_array($lastArgs['hypothetical_stock_additions'] ?? null) ? $lastArgs['hypothetical_stock_additions'] : [];
