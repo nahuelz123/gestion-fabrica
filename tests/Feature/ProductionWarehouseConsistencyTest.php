@@ -48,6 +48,22 @@ class ProductionWarehouseConsistencyTest extends TestCase
         $this->assertSame(0, $calculator->calculateMaxProducible($d['finished'], [], $d['primary']->id)['max_units']);
     }
 
+
+    public function test_telegram_checks_stock_in_the_same_warehouse_where_it_produces(): void
+    {
+        $d = $this->fixture();
+
+        $answer = app(\App\Services\BotActionExecutor::class)->execute(
+            $d['user'],
+            'warehouse-test-chat',
+            ['name' => 'check_production', 'arguments' => ['product_name' => 'Hamburguesa', 'quantity' => 10]],
+            []
+        );
+
+        $this->assertTrue($answer['success'], $answer['message']);
+        $this->assertStringContainsString('No alcanza', $answer['message']);
+    }
+
     public function test_selected_warehouse_cannot_use_other_deposits_stock(): void
     {
         $d = $this->fixture();
