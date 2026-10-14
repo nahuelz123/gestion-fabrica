@@ -156,6 +156,13 @@ class BotAgentService
             if ($result['success']) {
                 $context['status']='completed'; $context['pending_action']=null; $context['last_read_action']=$actionToExecute;
                 $this->rememberUsefulReferences($context,$actionToExecute);
+            } elseif (!empty($result['candidates']) && is_array($result['candidates'])) {
+                $context['status'] = 'collecting';
+                $context['pending_action'] = $actionToExecute;
+                $context['disambiguation'] = [
+                    'field' => 'product_name',
+                    'candidates' => array_values($result['candidates']),
+                ];
             } else $context['status']='idle';
         }
         $context=$this->addRecentMessage($context,'assistant',$reply); $this->saveContext($conversation,$context);
@@ -440,6 +447,19 @@ class BotAgentService
         $args=is_array($action['arguments'] ?? null) ? $action['arguments'] : [];
         $args['product_name']=$selected;
         $action['arguments']=$args;
+        $readActions = ['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
+        if (in_array($action['name'] ?? '', $readActions, true)) {
+            $result = app(BotActionExecutor::class)->execute($user, (string) $user->telegram_chat_id, $action, $context);
+            $context['status'] = $result['success'] ? 'completed' : 'idle';
+            $context['pending_action'] = null;
+            if ($result['success']) {
+                $context['last_read_action'] = $action;
+                $this->rememberUsefulReferences($context, $action);
+            }
+            unset($context['disambiguation']);
+            return ['context' => $context, 'reply' => $result['message']];
+        }
+
         $context['pending_action']=$action;
         $context['status']='ready_for_confirmation';
         unset($context['disambiguation']);
