@@ -1,5 +1,5 @@
 <div>
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-6">
         <h1 class="text-2xl font-bold text-gray-800">Compras</h1>
         <a href="{{ route('purchases.create') }}" wire:navigate class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition">
             + Nueva Compra
@@ -17,7 +17,28 @@
                class="w-full sm:w-96 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 text-sm px-3 py-2 border">
     </div>
 
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+    
+    <div class="space-y-3 sm:hidden">
+        @forelse($purchases as $purchase)
+            <article class="rounded-xl border bg-white p-4 shadow-sm">
+                <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                        <h2 class="font-semibold text-gray-900">Compra #{{ $purchase->id }}</h2>
+                        <p class="mt-1 break-words text-sm text-gray-600">{{ $purchase->supplier->name }}</p>
+                    </div>
+                    <span class="shrink-0 rounded-full px-2 py-1 text-xs font-semibold {{ $purchase->status->value === 'confirmed' ? 'bg-green-100 text-green-800' : ($purchase->status->value === 'draft' ? 'bg-gray-100 text-gray-800' : 'bg-red-100 text-red-800') }}">
+                        {{ $purchase->status->value === 'confirmed' ? 'Confirmada' : ($purchase->status->value === 'draft' ? 'Borrador' : 'Cancelada') }}
+                    </span>
+                </div>
+                <p class="mt-3 text-sm text-gray-500">{{ $purchase->purchase_date->format('d/m/Y') }} · {{ $purchase->warehouse->name }}</p>
+                <p class="mt-1 text-sm text-gray-500">Comprobante: {{ $purchase->invoice_number ?: '—' }}</p>
+                <a href="{{ route('purchases.show', $purchase->id) }}" wire:navigate class="mt-4 flex min-h-11 items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Ver / procesar</a>
+            </article>
+        @empty
+            <div class="rounded-xl border bg-white p-6 text-center text-sm text-gray-500">No hay compras registradas.</div>
+        @endforelse
+    </div>
+    <div data-table-scroll tabindex="0" role="region" aria-label="Compras detalladas" class="hidden sm:block bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>
