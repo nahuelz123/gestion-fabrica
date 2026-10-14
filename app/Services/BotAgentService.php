@@ -27,7 +27,7 @@ class BotAgentService
         $currentStatus = $context['status'] ?? 'idle';
 
         if ($currentStatus === 'collecting' && !empty($context['disambiguation']) && !empty($context['pending_action'])) {
-            $handled=$this->handleDisambiguation($context,$textNorm);
+            $handled=$this->handleDisambiguation($user,$context,$textNorm);
             if ($handled) {
                 $context=$handled['context'];
                 $reply=$handled['reply'];
@@ -348,7 +348,7 @@ class BotAgentService
         };
     }
 
-    private function handleDisambiguation(array $context,string $textNorm): ?array
+    private function handleDisambiguation(User $user,array $context,string $textNorm): ?array
     {
         $data=is_array($context['disambiguation'] ?? null) ? $context['disambiguation'] : [];
         $candidates=array_values(array_filter($data['candidates'] ?? [], 'is_string'));
@@ -411,7 +411,7 @@ class BotAgentService
 
         return [
             'context'=>$context,
-            'reply'=>$this->previewService->preview(auth()->user(),$action),
+            'reply'=>$this->previewService->preview($user,$action),
         ];
     }
 
