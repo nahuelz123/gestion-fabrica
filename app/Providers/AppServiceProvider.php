@@ -21,9 +21,12 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if ($this->app->environment('production')) {
+        $isProduction = $this->app->environment('production')
+            || env('RAILWAY_ENVIRONMENT_NAME') === 'production';
+
+        if ($isProduction) {
             // No exponer stack traces, rutas internas ni configuración sensible aunque
-            // APP_DEBUG haya quedado habilitado por error en el proveedor de hosting.
+            // APP_ENV/APP_DEBUG hayan quedado con un valor viejo en el hosting.
             config(['app.debug' => false]);
             URL::forceScheme('https');
         }
