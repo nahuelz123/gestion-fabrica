@@ -13,7 +13,7 @@
 
     <input wire:model.live.debounce.300ms="search" type="text" placeholder="Buscar por nombre, email o teléfono..." class="w-full sm:w-96 rounded-lg border-gray-300 px-3 py-3 border text-sm">
 
-    <div class="bg-white border rounded-xl overflow-x-auto">
+    <div data-table-scroll tabindex="0" role="region" aria-label="Tabla de datos" class="bg-white border rounded-xl overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>

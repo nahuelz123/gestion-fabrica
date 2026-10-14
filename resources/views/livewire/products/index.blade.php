@@ -23,7 +23,7 @@
         </select>
     </div>
 
-    <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
+    <div data-table-scroll tabindex="0" role="region" aria-label="Tabla de datos" class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
                 <tr>

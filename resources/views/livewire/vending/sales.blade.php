@@ -1,5 +1,5 @@
 <div class="space-y-6">
-    <div class="flex items-center justify-between gap-4">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
             <h1 class="text-2xl font-bold text-gray-800">Ventas de máquinas</h1>
             <p class="text-sm text-gray-500">Filtrá por kiosco o máquina y mirá cuántas ventas hizo cada una.</p>
@@ -21,7 +21,27 @@
         <div class="bg-white border rounded-xl p-4"><div class="text-xs text-gray-500">Cobrado</div><div class="text-xl font-bold">${{ number_format($summary['amount'], 0, ',', '.') }}</div></div>
     </div>
 
-    <div class="bg-white border rounded-xl overflow-x-auto">
+    
+    <div class="space-y-3 sm:hidden">
+        @forelse($sales as $sale)
+            <article class="rounded-xl border bg-white p-4 shadow-sm">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <h2 class="break-words font-semibold">{{ $sale->product->name }}</h2>
+                        <p class="mt-1 text-xs text-gray-500">{{ $sale->sold_at?->format('d/m/Y H:i') }}</p>
+                    </div>
+                    <span class="shrink-0 font-bold">ARS {{ number_format(max(0, (float)$sale->gross_amount - (float)$sale->refunded_amount), 0, ',', '.') }}</span>
+                </div>
+                <p class="mt-3 break-words text-sm text-gray-600">{{ $sale->partner->name }} · {{ $sale->machine->name }}</p>
+                <p class="mt-2 text-xs font-semibold {{ $sale->status === 'refunded' ? 'text-red-700' : ($sale->status === 'partially_refunded' ? 'text-orange-700' : 'text-green-700') }}">
+                    {{ $sale->status === 'refunded' ? 'Reembolsada' : ($sale->status === 'partially_refunded' ? 'Reembolso parcial' : 'Venta') }}
+                </p>
+            </article>
+        @empty
+            <div class="rounded-xl border bg-white p-6 text-center text-sm text-gray-500">No hay ventas en el período seleccionado.</div>
+        @endforelse
+    </div>
+    <div data-table-scroll tabindex="0" role="region" aria-label="Ventas detalladas" class="hidden sm:block bg-white border rounded-xl overflow-x-auto">
         <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50"><tr>
                 <th class="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Fecha</th>
