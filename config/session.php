@@ -2,7 +2,7 @@
 
 use Illuminate\Support\Str;
 
-$isProduction = env('APP_ENV') === 'production';
+$isProduction = env('APP_ENV') === 'production' || env('RAILWAY_ENVIRONMENT_NAME') === 'production';
 
 return [
     'driver' => env('SESSION_DRIVER', 'database'),
