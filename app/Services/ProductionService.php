@@ -26,7 +26,7 @@ class ProductionService
             $companyId = $user->company_id;
             $product = Product::where('company_id',$companyId)->whereKey($productId)->lockForUpdate()->firstOrFail();
             $warehouse = Warehouse::where('company_id',$companyId)->whereKey($warehouseId)->firstOrFail();
-            $calculation = $this->calculator->calculateRequirements($product,$targetQuantity);
+            $calculation = $this->calculator->calculateRequirements($product,$targetQuantity,$warehouse->id);
             if (!$calculation['can_produce']) throw new Exception('No hay stock suficiente para producir la cantidad solicitada.');
 
             $order = ProductionOrder::create(['company_id'=>$companyId,'product_id'=>$product->id,'warehouse_id'=>$warehouse->id,'target_quantity'=>$targetQuantity,'status'=>'completed','user_id'=>$user->id]);

@@ -24,6 +24,16 @@
                 </div>
 
                 <div>
+                    <label for="production-warehouse" class="block text-sm font-medium text-gray-700">Depósito de producción</label>
+                    <select id="production-warehouse" wire:model="warehouse_id" class="mt-1 block w-full rounded-lg border-gray-300 text-base px-3 py-3 border focus:border-red-500 focus:ring-red-500">
+                        @foreach($warehouses as $warehouse)
+                            <option value="{{ $warehouse->id }}">{{ $warehouse->name }}</option>
+                        @endforeach
+                    </select>
+                    @error('warehouse_id') <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
+                </div>
+
+                <div>
                     <label class="block text-sm font-medium text-gray-700 mb-2">¿Cuánto?</label>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
@@ -113,7 +123,7 @@
                 <div class="bg-yellow-50 border border-yellow-200 border-dashed rounded-xl p-12 text-center text-gray-500">
                     <div class="text-4xl mb-3">🏭</div>
                     <p class="font-medium text-gray-800">Cargá el producto y la cantidad.</p>
-                    <p class="text-sm mt-1">Te digo enseguida si alcanza el stock.</p>
+                    <p class="text-sm mt-1">Te digo enseguida si alcanza el stock del depósito seleccionado.</p>
                 </div>
             @endif
         </div>
