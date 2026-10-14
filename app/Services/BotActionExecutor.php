@@ -276,9 +276,46 @@ class BotActionExecutor
         $confirmedIds = (clone $confirmed)->select('id');
         $total = (float) \App\Models\PurchaseItem::whereIn('purchase_id', $confirmedIds)
             ->selectRaw('COALESCE(SUM(quantity * unit_cost), 0) as total')->value('total');
-        return ['success' => true, 'message' => "Compras en los últimos {$days} días (incluido hoy): " .
-            (clone $confirmed)->count() . ' confirmadas, ' . (clone $query)->where('status', 'draft')->count() .
-            ' borradores. Importe estimado de compras confirmadas: 
+        $confirmedCount = (clone $confirmed)->count();
+        $draftCount = (clone $query)->where('status', 'draft')->count();
+        return [
+            'success' => true,
+            'message' => "Compras en los últimos {$days} días (incluido hoy): {$confirmedCount} confirmadas, {$draftCount} borradores. " .
+                'Importe estimado de compras confirmadas: ARS ' . number_format($total, 2, ',', '.') . '.',
+        ];
+    }
+
+    private function executeGetSuppliers(int $companyId): array
+    {
+        $suppliers = Supplier::where('company_id', $companyId)->orderBy('name')
+            ->limit(30)->get(['name', 'phone', 'email']);
+        if ($suppliers->isEmpty()) {
+            return ['success' => true, 'message' => 'No hay proveedores cargados.'];
+        }
+        $lines = ['Proveedores registrados:'];
+        foreach ($suppliers as $supplier) {
+            $contact = array_filter([$supplier->phone, $supplier->email]);
+            $lines[] = '- ' . $supplier->name . ($contact ? ' — ' . implode(' / ', $contact) : '');
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function executeGetBusinessSummary(int $companyId, array $args): array
+    {
+        $days = $this->readPeriod($args);
+        $products = Product::where('company_id', $companyId)->where('status', 'active')->count();
+        $orders = ProductionOrder::where('company_id', $companyId)
+            ->whereDate('created_at', '>=', now()->subDays($days - 1)->toDateString())
+            ->where('status', 'completed')->count();
+        $sales = $this->executeGetSalesSummary($companyId, ['days' => $days])['message'];
+        $purchases = $this->executeGetPurchasesSummary($companyId, ['days' => $days])['message'];
+
+        return [
+            'success' => true,
+            'message' => "Resumen de la fábrica: {$products} productos activos y {$orders} órdenes de producción completadas en los últimos {$days} días.\n{$purchases}\n{$sales}",
+        ];
+    }
+
     private function executeCreateProduct(int $companyId, array $args): array
     {
         if (empty($args['name']) || empty($args['presentation'])) {
