@@ -52,8 +52,8 @@
 
             <div class="space-y-4">
                 @foreach($items as $index => $item)
-                    <div class="flex items-start space-x-4">
-                        <div class="flex-1">
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-start">
+                        <div class="min-w-0 flex-1">
                             <label class="block text-xs font-medium text-gray-500 uppercase">Insumo</label>
                             <select wire:model.live="items.{{ $index }}.product_id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 text-sm px-3 py-2 border">
                                 <option value="">Seleccionar insumo...</option>
@@ -66,7 +66,7 @@
                             @error("items.{$index}.product_id") <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
                         </div>
 
-                        <div class="w-1/3">
+                        <div class="w-full sm:w-1/3">
                             <label class="block text-xs font-medium text-gray-500 uppercase">Cantidad</label>
                             <div class="mt-1 flex rounded-md shadow-sm">
                                 <input wire:model="items.{{ $index }}.quantity_base" type="number" step="0.0001" class="flex-1 block w-full rounded-none rounded-l-md border-gray-300 focus:border-blue-500 text-sm px-3 py-2 border">
@@ -80,8 +80,8 @@
                             @error("items.{$index}.quantity_base") <p class="mt-1 text-xs text-red-600">{{ $message }}</p> @enderror
                         </div>
 
-                        <div class="pt-6">
-                            <button type="button" wire:click="removeItem({{ $index }})" class="text-red-500 hover:text-red-700 font-bold p-2" title="Eliminar insumo">
+                        <div class="self-end sm:self-auto sm:pt-6">
+                            <button type="button" wire:click="removeItem({{ $index }})" class="flex min-h-11 min-w-11 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 font-bold" title="Eliminar insumo">
                                 &times;
                             </button>
                         </div>

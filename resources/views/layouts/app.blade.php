@@ -28,7 +28,7 @@
 </nav>
 <div x-cloak x-show="sidebarOpen" x-transition.opacity @click="sidebarOpen = false" class="fixed inset-0 z-30 bg-gray-950/60 md:hidden" aria-hidden="true"></div>
 <div class="mx-auto w-full max-w-screen-2xl md:flex">
-    <aside id="app-sidebar" aria-label="Menú principal" class="fixed inset-y-0 left-0 z-40 flex h-[100dvh] w-[min(19rem,85vw)] flex-col overflow-y-auto border-r border-gray-200 bg-white shadow-xl transition-transform duration-200 ease-out md:sticky md:top-0 md:h-[calc(100dvh-4rem)] md:w-64 md:shrink-0 md:translate-x-0 md:shadow-none" :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
+    <aside x-cloak id="app-sidebar" aria-label="Menú principal" class="fixed inset-y-0 left-0 z-40 flex h-[100dvh] w-[min(19rem,85vw)] flex-col overflow-y-auto border-r border-gray-200 bg-white shadow-xl transition-transform duration-200 ease-out md:sticky md:top-0 md:h-[calc(100dvh-4rem)] md:w-64 md:shrink-0 md:translate-x-0 md:shadow-none" :class="sidebarOpen ? 'translate-x-0' : '-translate-x-full'">
         <div class="flex items-center justify-between border-b px-4 py-2 md:hidden">
             <strong class="text-sm text-gray-700">Navegación</strong>
             <button type="button" @click="sidebarOpen = false" class="min-h-11 min-w-11 rounded-lg text-gray-700 hover:bg-gray-100" aria-label="Cerrar menú">✕</button>

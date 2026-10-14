@@ -1,6 +1,6 @@
 <div>
     <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">Producción</h1>
+        <h1 class="break-words text-2xl font-bold text-gray-900">Producción</h1>
         <p class="text-sm text-gray-500 mt-1">Elegí el producto, cargá carros o bandejas y confirmá. El sistema calcula y descuenta los insumos.</p>
     </div>
 
@@ -12,7 +12,7 @@
     @endif
 
     <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
-        <div class="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6 h-fit">
+        <div class="min-w-0 lg:col-span-2 bg-white rounded-xl border border-gray-200 p-4 sm:p-6 h-fit">
             <form wire:submit="calculate" class="space-y-5">
                 <div>
                     <label class="block text-sm font-medium text-gray-700">¿Qué hicieron?</label>
@@ -62,7 +62,7 @@
             </form>
         </div>
 
-        <div class="lg:col-span-3">
+        <div class="min-w-0 lg:col-span-3">
             @if ($result)
                 <div class="rounded-xl border overflow-hidden bg-white">
                     <div class="p-5 {{ $result['can_produce'] ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200' }}">
@@ -80,12 +80,12 @@
                                 $missing = $item['missing'] > 0;
                                 $unit = $item['ingredient']->baseUnit->abbreviation ?? 'u';
                             @endphp
-                            <div class="p-4 flex items-center justify-between gap-4 {{ $missing ? 'bg-red-50/40' : '' }}">
+                            <div class="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 {{ $missing ? 'bg-red-50/40' : '' }}">
                                 <div>
                                     <div class="font-medium text-gray-900">{{ $item['ingredient']->name }}</div>
                                     <div class="text-xs text-gray-400">Hay {{ rtrim(rtrim(number_format($item['available'], 4, '.', ''), '0'), '.') }} {{ $unit }}</div>
                                 </div>
-                                <div class="text-right">
+                                <div class="sm:text-right">
                                     <div class="font-semibold {{ $missing ? 'text-red-600' : 'text-gray-900' }}">Necesita {{ rtrim(rtrim(number_format($item['required'], 4, '.', ''), '0'), '.') }} {{ $unit }}</div>
                                     @if($missing)<div class="text-xs text-red-600">Faltan {{ rtrim(rtrim(number_format($item['missing'], 4, '.', ''), '0'), '.') }} {{ $unit }}</div>@else<div class="text-xs text-green-600">OK</div>@endif
                                 </div>
