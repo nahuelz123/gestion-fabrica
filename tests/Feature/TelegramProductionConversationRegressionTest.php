@@ -122,8 +122,8 @@ class TelegramProductionConversationRegressionTest extends TestCase
         $telegram->shouldReceive('sendMessage')->once()->with(
             '4321',
             Mockery::on(fn ($reply) =>
-                str_contains($reply, 'Orden #1')
-                && str_contains($reply, 'Orden #2')
+                str_contains($reply, '144 unidades')
+                && str_contains($reply, '288 unidades')
                 && str_contains($reply, 'No desconté ni devolví')
             )
         );
