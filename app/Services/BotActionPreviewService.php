@@ -34,8 +34,8 @@ class BotActionPreviewService
                 : (float) ($args['quantity'] ?? 0);
 
             $parts = [];
-            if ($carros > 0) $parts[] = $this->number($carros) . ' ' . ($carros == 1 ? 'carro' : 'carros');
-            if ($bandejas > 0) $parts[] = $this->number($bandejas) . ' ' . ($bandejas == 1 ? 'bandeja' : 'bandejas');
+            if ($carros > 0) $parts[] = abs($carros - 0.5) < 0.000001 ? 'medio carro' : $this->number($carros) . ' ' . ($carros <= 1 ? 'carro' : 'carros');
+            if ($bandejas > 0) $parts[] = abs($bandejas - 0.5) < 0.000001 ? 'media bandeja' : $this->number($bandejas) . ' ' . ($bandejas <= 1 ? 'bandeja' : 'bandejas');
             $display = $parts
                 ? implode(' + ', $parts) . ' = ' . $this->number($quantity) . ' unidades'
                 : $this->number($quantity) . ' unidades';
