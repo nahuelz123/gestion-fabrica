@@ -57,6 +57,8 @@ class BotActionExecutor
                     'get_purchases_summary' => $this->executeGetPurchasesSummary($companyId, $args),
                     'get_business_summary' => $this->executeGetBusinessSummary($companyId, $args),
                     'get_suppliers' => $this->executeGetSuppliers($companyId),
+                    'compare_max_production' => $this->executeCompareMaxProduction($companyId, $args),
+                    'get_recent_productions' => $this->executeGetRecentProductions($companyId, $args),
                     'create_product' => $this->executeCreateProduct($companyId, $args),
                     'register_stock' => $this->executeRegisterStock($companyId, $user->id, $args),
                     'adjust_stock' => $this->executeAdjustStock($companyId, $user->id, $args),
@@ -265,6 +267,83 @@ class BotActionExecutor
         $refunds = (clone $base)->whereIn('status', ['refunded', 'partially_refunded'])->count();
         return ['success' => true, 'message' => "Ventas de máquinas en los últimos {$days} días (incluido hoy): {$count} ventas válidas. Importe neto registrado: $" .
             number_format(max(0, $net), 2, ',', '.') . ". Ventas con devolución total o parcial: {$refunds}. Estos datos corresponden a ventas registradas, no a una conciliación bancaria."];
+    }
+
+
+    private function executeGetRecentProductions(int $companyId, array $args): array
+    {
+        $query = ProductionOrder::where('company_id', $companyId)
+            ->where('status', 'completed')
+            ->with('product:id,name');
+        $name = trim((string) ($args['product_name'] ?? ''));
+        if ($name !== '' && !in_array(mb_strtolower($name), ['all', 'todos', 'todo'], true)) {
+            $query->whereHas('product', fn ($product) => $product->where('name', 'like', '%' . $name . '%'));
+        }
+        $orders = $query->orderByDesc('id')->limit(max(1, min(15, (int) ($args['limit'] ?? 8))))->get();
+        if ($orders->isEmpty()) {
+            return ['success' => true, 'message' => 'No encontré órdenes de producción confirmadas para esa consulta.'];
+        }
+        $lines = ['Órdenes de producción confirmadas:'];
+        foreach ($orders as $order) {
+            $lines[] = '- #' . $order->id . ': ' . ($order->product?->name ?? 'Producto') .
+                ', ' . $this->formatNumber((float) $order->target_quantity) . ' unidades (' .
+                $order->created_at->format('d/m H:i') . ')';
+        }
+        return ['success' => true, 'message' => implode("\n", $lines)];
+    }
+
+    private function executeCompareMaxProduction(int $companyId, array $args): array
+    {
+        $names = array_values(array_unique(array_filter((array) ($args['product_names'] ?? []), 'is_string')));
+        if (count($names) < 2 || count($names) > 4) {
+            return ['success' => false, 'message' => 'Decime las dos variedades de hamburguesas que querés comparar.'];
+        }
+
+        $warehouseId = $this->productionWarehouseId($companyId);
+        if ($warehouseId <= 0) return ['success' => false, 'message' => 'No hay un depósito de producción configurado.'];
+
+        $lines = ['Máximo de producción por variedad, calculado por separado:'];
+        foreach ($names as $name) {
+            $name = trim($name);
+            if ($name === '') continue;
+            $options = Product::where('company_id', $companyId)
+                ->where('type', 'finished_product')->where('status', 'active')
+                ->where(function ($query) use ($name) {
+                    $query->where('name', 'like', '%' . $name . '%')
+                        ->orWhereHas('aliases', fn ($aliases) => $aliases->where('alias', 'like', '%' . $name . '%'));
+                })->limit(5)->get();
+
+            if ($options->count() !== 1) {
+                $answer = $options->isEmpty()
+                    ? "No encontré una hamburguesa para '{$name}'."
+                    : "Hay varias hamburguesas que coinciden con '{$name}': " . $options->pluck('name')->implode(', ') . '.';
+                return ['success' => false, 'message' => $answer . ' Decime el nombre completo para calcularlo.'];
+            }
+            $product = $options->first();
+            try {
+                $max = $this->calculatorService->calculateMaxProducible($product, [], $warehouseId);
+            } catch (Exception $exception) {
+                return ['success' => false, 'message' => 'No pude calcular ' . $product->name . ': ' . $exception->getMessage()];
+            }
+            $units = max(0, (int) $max['max_units']);
+            $cars = intdiv($units, ProductionOrderService::HAMBURGUESAS_PER_CARRO);
+            $remainder = $units % ProductionOrderService::HAMBURGUESAS_PER_CARRO;
+            $trays = intdiv($remainder, ProductionOrderService::HAMBURGUESAS_PER_BANDEJA);
+            $loose = $remainder % ProductionOrderService::HAMBURGUESAS_PER_BANDEJA;
+            $parts = [];
+            if ($cars > 0) $parts[] = $cars . ' ' . ($cars === 1 ? 'carro' : 'carros');
+            if ($trays > 0) $parts[] = $trays . ' ' . ($trays === 1 ? 'bandeja' : 'bandejas');
+            if ($loose > 0 || !$parts) $parts[] = $loose . ' unidades';
+
+            $line = '- ' . $product->name . ': ' . implode(', ', $parts) . " ({$units} unidades)";
+            if (!empty($max['limiting_ingredient'])) {
+                $line .= '. Insumo limitante: ' . $max['limiting_ingredient']->name;
+            }
+            $lines[] = $line;
+        }
+
+        $lines[] = 'Ojo: son máximos individuales. Como las variedades comparten insumos, no podés sumar esos resultados. Para producir ambas en conjunto necesito un plan con las cantidades de cada una.';
+        return ['success' => true, 'message' => implode("\n", $lines)];
     }
 
     private function executeGetPurchasesSummary(int $companyId, array $args): array

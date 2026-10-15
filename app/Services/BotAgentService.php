@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AiConversation;
 use App\Models\Product;
+use App\Models\ProductionOrder;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 
@@ -48,6 +49,18 @@ class BotAgentService
                 $this->telegramService->sendMessage($chatId, $correction['reply']);
                 return;
             }
+        }
+
+        // Una aclaración sobre producción ya registrada nunca puede crear otra orden.
+        // Las órdenes confirmadas sólo se corrigen mediante una conciliación explícita.
+        $correctionReply = $this->completedProductionCorrectionReply($user, $textNorm);
+        if ($correctionReply !== null) {
+            $context['status'] = 'idle';
+            $context['pending_action'] = null;
+            $context = $this->addRecentMessage($context, 'assistant', $correctionReply);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $correctionReply);
+            return;
         }
 
         $cancelWords = ['no','cancelar','cancelá','cancela','dejá','deja','mejor no'];
@@ -100,6 +113,7 @@ class BotAgentService
         $aiContext['catalog']=$this->catalogHint($user->company_id);
         $analysis=$this->geminiService->analyzeConversation($text,$aiContext);
         $analysis=$this->repairProductionLanguage($analysis,$textNorm);
+        $analysis=$this->repairMultipleMaxProductionLanguage($analysis,$textNorm);
         $analysis=$this->repairStockMutationLanguage($analysis,$textNorm);
 
         if (($analysis['intent'] ?? 'unknown') === 'unknown' && empty($analysis['action'])) {
@@ -122,7 +136,7 @@ class BotAgentService
             $this->telegramService->sendMessage($chatId,$reply); return;
         }
 
-        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers'];
+        $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','compare_max_production','get_recent_productions'];
         $status='idle'; $actionToExecute=null; $actionName=$action['name'] ?? ''; $previewReply=null;
         $supportedMutations = ['create_product','update_product','create_recipe','update_recipe','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production'];
         if ($action && !in_array($actionName, [...$readActions, ...$supportedMutations], true)) {
@@ -143,6 +157,21 @@ class BotAgentService
             $this->saveContext($conversation, $context);
             $this->telegramService->sendMessage($chatId, $reply);
             return;
+        }
+        if ($actionName === 'register_production' && $action) {
+            $args = (array) ($action['arguments'] ?? []);
+            $carros = (float) ($args['carros'] ?? 0);
+            $bandejas = (float) ($args['bandejas'] ?? 0);
+            if (($carros > 0 || $bandejas > 0) && isset($args['quantity'])
+                && abs((float)$args['quantity'] - ProductionOrderService::toHamburguesas($carros, $bandejas)) > 0.01) {
+                $reply = 'La cantidad en carros/bandejas no coincide con las unidades informadas. ¿Cuál es la cantidad correcta? No registré ninguna producción.';
+                $context['status'] = 'idle';
+                $context['pending_action'] = null;
+                $context = $this->addRecentMessage($context, 'assistant', $reply);
+                $this->saveContext($conversation, $context);
+                $this->telegramService->sendMessage($chatId, $reply);
+                return;
+            }
         }
         if ($action && in_array($actionName,$readActions,true)) { $status='confirmed'; $actionToExecute=$action; }
         elseif ($action) { $status='ready_for_confirmation'; $context['pending_action']=$action; $previewReply=$this->previewService->preview($user,$action); }
@@ -221,6 +250,71 @@ class BotAgentService
         return $analysis;
     }
 
+
+    /**
+     * Corrections of already-completed production must never be interpreted as
+     * a new order. We report actual persisted orders without changing inventory.
+     */
+    private function completedProductionCorrectionReply(User $user, string $text): ?string
+    {
+        $correctionPattern = '/\b(?:en\s+vez\s+de|me\s+equivoqu[eé]|correg[ií]|corregir|correcci[oó]n|rectific[aá]|hab[ií]a\s+confirmado|hab[ií]amos\s+confirmado|no\s+fue\s+(?:un|una|la)|al\s+final\s+(?:hicimos|produjimos|salieron)|(?:solo|s[oó]lo)\s+(?:hicimos|produjimos|fabricamos))\b/iu';
+        if (!preg_match($correctionPattern, $text)) return null;
+        if (!preg_match('/\b(?:carritos?|carros?|bandejas?|hamburguesas?|producci[oó]n|orden(?:es)?|fabricamos|producimos|hicimos)\b/iu', $text)) return null;
+
+        if (!$user->canManageProduction()) {
+            return 'No tenés permiso para consultar o corregir órdenes de producción.';
+        }
+
+        $orders = ProductionOrder::query()
+            ->where('company_id', $user->company_id)
+            ->where('status', 'completed')
+            ->with('product:id,name')
+            ->orderByDesc('id')
+            ->limit(5)
+            ->get();
+
+        if ($orders->isEmpty()) {
+            return 'Entiendo que querés corregir una producción, no registrar otra. No encontré órdenes confirmadas recientes y no modifiqué el stock.';
+        }
+
+        $lines = [
+            'Entiendo: estás corrigiendo una producción ya confirmada, NO querés registrar otra.',
+            'No desconté ni devolví insumos con este mensaje.',
+            'Últimas órdenes registradas:',
+        ];
+        foreach ($orders as $order) {
+            $lines[] = '- Orden #' . $order->id . ' · ' . ($order->product?->name ?? 'Producto') .
+                ': ' . rtrim(rtrim(number_format((float) $order->target_quantity, 2, '.', ''), '0'), '.') .
+                ' unidades.';
+        }
+        $lines[] = 'Decime cuál orden estaba mal y cuál fue la producción real. Para no alterar lotes ni descontar dos veces, la anulación o el ajuste de una orden confirmada requiere conciliación de los movimientos originales; no voy a crear otra orden como si fuera una corrección.';
+        return implode("\n", $lines);
+    }
+
+    /**
+     * Handle a question about multiple production varieties in one response.
+     * Each result is an independent maximum, not an additive joint plan.
+     */
+    private function repairMultipleMaxProductionLanguage(array $analysis, string $text): array
+    {
+        if (!preg_match('/\b(?:cu[aá]ntos?|hasta)\b/iu', $text)) return $analysis;
+        $pattern = '/(?:carritos?|carros?|bandejas?)\s+de\s+(?<one>[\p{L}]+(?:\s+[\p{L}]+){0,2}?)\s+y\s+(?:cu[aá]ntos?\s+)?(?:(?:carritos?|carros?|bandejas?)\s+)?(?:de\s+)?(?<two>[\p{L}]+(?:\s+[\p{L}]+){0,2}?)(?=\s+(?:puedo|podemos|hacer|producir)\b|\s*[?!.]|$)/iu';
+        if (!preg_match($pattern, $text, $match)) return $analysis;
+
+        $first = trim((string) $match['one']);
+        $second = trim((string) $match['two']);
+        if ($first === '' || $second === '' || mb_strtolower($first) === mb_strtolower($second)) return $analysis;
+
+        $analysis['intent'] = 'compare_max_production';
+        $analysis['action'] = [
+            'name' => 'compare_max_production',
+            'arguments' => ['product_names' => [$first, $second]],
+        ];
+        $analysis['missing'] = [];
+        $analysis['requires_confirmation'] = false;
+        return $analysis;
+    }
+
     private function repairProductionLanguage(array $analysis,string $text): array
     {
         $parsed=$this->parseProductionPhrase($text);
@@ -269,7 +363,7 @@ class BotAgentService
     private function parseProductionPhrase(string $text): ?array
     {
         $normalized=trim(mb_strtolower($text));
-        $number='(?:\\d+(?:[\\.,]\\d+)?|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)';
+        $number='(?:\\d+(?:[\\.,]\\d+)?|medio|media|un|una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce)';
 
         $carros=0.0;
         $bandejas=0.0;
@@ -375,6 +469,7 @@ class BotAgentService
 
         return match($value) {
             'un','una','uno' => 1.0,
+            'medio','media' => 0.5,
             'dos' => 2.0,
             'tres' => 3.0,
             'cuatro' => 4.0,

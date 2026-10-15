@@ -50,6 +50,7 @@ class User extends Authenticatable
             'register_stock', 'adjust_stock', 'set_stock', 'add_stock', 'remove_stock',
             'calculate_production', 'check_production', 'get_max_production',
             'get_missing_inputs', 'plan_production', 'register_production',
+            'compare_max_production', 'get_recent_productions',
 
             // Productos, recetas, compras, proveedores, usuarios y máquinas
             // siguen siendo tareas administrativas de los dueños.
