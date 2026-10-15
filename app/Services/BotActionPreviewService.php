@@ -27,13 +27,20 @@ class BotActionPreviewService
 
         if ($name === 'register_production') {
             $product = $args['product_name'] ?? 'el producto indicado';
-            $parts = [];
-            if (!empty($args['carros'])) $parts[] = $args['carros'] . ' carro(s)';
-            if (!empty($args['bandejas'])) $parts[] = $args['bandejas'] . ' bandeja(s)';
-            if (!empty($args['quantity'])) $parts[] = $args['quantity'] . ' u';
-            $qty = $parts ? implode(' + ', $parts) : 'la cantidad indicada';
+            $carros = (float) ($args['carros'] ?? 0);
+            $bandejas = (float) ($args['bandejas'] ?? 0);
+            $quantity = ($carros > 0 || $bandejas > 0)
+                ? ProductionOrderService::toHamburguesas($carros, $bandejas)
+                : (float) ($args['quantity'] ?? 0);
 
-            $lines = ["Voy a registrar producción de {$product}: {$qty}."];
+            $parts = [];
+            if ($carros > 0) $parts[] = $this->number($carros) . ' ' . ($carros == 1 ? 'carro' : 'carros');
+            if ($bandejas > 0) $parts[] = $this->number($bandejas) . ' ' . ($bandejas == 1 ? 'bandeja' : 'bandejas');
+            $display = $parts
+                ? implode(' + ', $parts) . ' = ' . $this->number($quantity) . ' unidades'
+                : $this->number($quantity) . ' unidades';
+
+            $lines = ["Voy a registrar producción de {$product}: {$display}."];
 
             $actual = is_array($args['actual_consumptions'] ?? null)
                 ? $args['actual_consumptions']
