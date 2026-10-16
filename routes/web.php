@@ -23,6 +23,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::get('/inventario/entrada', \App\Livewire\Inventory\StockEntry::class)->name('inventory.entry');
         Route::get('/inventario/salida', \App\Livewire\Inventory\StockExit::class)->name('inventory.exit');
         Route::get('/inventario/ajuste', \App\Livewire\Inventory\StockManager::class)->name('inventory.adjust');
+        Route::get('/inventario/importar', \App\Livewire\Inventory\StockImportPage::class)->name('inventory.import');
         Route::get('/inventario/movimientos', \App\Livewire\Inventory\StockMovements::class)->name('inventory.movements');
     });
 

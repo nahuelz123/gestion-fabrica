@@ -1,0 +1,148 @@
+<?php
+
+namespace App\Livewire\Inventory;
+
+use App\Models\StockImport;
+use App\Models\Warehouse;
+use App\Services\StockImportService;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\Rule;
+use Livewire\Attributes\Layout;
+use Livewire\Component;
+use Livewire\WithFileUploads;
+use Throwable;
+
+#[Layout('layouts.app')]
+class StockImportPage extends Component
+{
+    use WithFileUploads;
+
+    public $spreadsheet = null;
+    public string $warehouseId = '';
+    public ?int $batchId = null;
+    public int $previewPage = 1;
+    public bool $confirmed = false;
+    public array $validationErrors = [];
+    public ?string $message = null;
+    public ?string $error = null;
+
+    public function mount(): void
+    {
+        Gate::authorize('manage-stock');
+        $this->warehouseId = (string) (Warehouse::where('company_id', auth()->user()->company_id)
+            ->orderBy('id')->value('id') ?? '');
+    }
+
+    public function updatedWarehouseId(): void
+    {
+        $this->batchId = null;
+        $this->previewPage = 1;
+        $this->confirmed = false;
+        $this->validationErrors = [];
+        $this->message = null;
+        $this->error = null;
+    }
+
+    public function preview(StockImportService $service): void
+    {
+        Gate::authorize('manage-stock');
+        $this->reset(['message', 'error', 'batchId', 'validationErrors']);
+        $this->confirmed = false;
+        $this->previewPage = 1;
+
+        $this->validate([
+            'warehouseId' => [
+                'required',
+                Rule::exists('warehouses', 'id')
+                    ->where(fn ($query) => $query->where('company_id', auth()->user()->company_id)),
+            ],
+            'spreadsheet' => 'required|file|mimes:xlsx,csv,txt|max:4096',
+        ], [
+            'spreadsheet.mimes' => 'El archivo tiene que ser .xlsx o .csv.',
+            'spreadsheet.max' => 'El archivo no puede superar 4 MB.',
+        ]);
+
+        try {
+            $result = $service->preview(
+                auth()->user(),
+                (int) $this->warehouseId,
+                $this->spreadsheet->getRealPath(),
+                $this->spreadsheet->getClientOriginalName(),
+            );
+            $this->validationErrors = $result['errors'];
+            $this->batchId = $result['batch']?->id;
+            if ($this->batchId) {
+                $this->message = 'Comparación preparada. Revisá las diferencias antes de confirmar.';
+            }
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->error = $exception instanceof \InvalidArgumentException
+                ? $exception->getMessage()
+                : 'No se pudo procesar el Excel. Comprobá el formato y probá de nuevo.';
+        }
+    }
+
+    public function apply(StockImportService $service): void
+    {
+        Gate::authorize('manage-stock');
+        if (!$this->confirmed || !$this->batchId) {
+            $this->error = 'Marcá la casilla de confirmación antes de modificar el inventario.';
+            return;
+        }
+
+        try {
+            $result = $service->apply(auth()->user(), $this->batchId);
+            $this->message = $result['message'];
+            $this->error = null;
+            $this->batchId = null;
+            $this->spreadsheet = null;
+            $this->confirmed = false;
+        } catch (Throwable $exception) {
+            report($exception);
+            $this->error = $exception instanceof \InvalidArgumentException
+                ? $exception->getMessage()
+                : 'No se pudieron aplicar los ajustes. No se hizo ninguna importación parcial.';
+            $this->confirmed = false;
+        }
+    }
+
+    public function nextPreviewPage(): void
+    {
+        Gate::authorize('manage-stock');
+        $this->previewPage = min(20, $this->previewPage + 1);
+    }
+
+    public function previousPreviewPage(): void
+    {
+        Gate::authorize('manage-stock');
+        $this->previewPage = max(1, $this->previewPage - 1);
+    }
+
+    public function downloadTemplate(\App\Services\StockTemplateExportService $exporter)
+    {
+        Gate::authorize('manage-stock');
+        return $exporter->download(auth()->user(), (int)$this->warehouseId);
+    }
+
+    public function render()
+    {
+        Gate::authorize('manage-stock');
+        $batch = $this->batchId
+            ? StockImport::where('company_id', auth()->user()->company_id)
+                ->where('user_id', auth()->id())->where('status', 'preview')
+                ->find($this->batchId)
+            : null;
+
+        $rows = collect($batch?->rows ?? []);
+        return view('livewire.inventory.stock-import-page', [
+            'previewPage' => max(1, min(20, $this->previewPage)),
+            'warehouses' => Warehouse::where('company_id', auth()->user()->company_id)
+                ->orderBy('name')->get(['id', 'name']),
+            'batch' => $batch,
+            'previewRows' => $rows->forPage(max(1, min(20, $this->previewPage)), 50),
+            'totalChanged' => $rows->filter(fn ($row) => abs((float)$row['difference']) >= 0.005)->count(),
+            'totalIncreased' => $rows->filter(fn ($row) => (float)$row['difference'] >= 0.005)->count(),
+            'totalDecreased' => $rows->filter(fn ($row) => (float)$row['difference'] <= -0.005)->count(),
+        ]);
+    }
+}
