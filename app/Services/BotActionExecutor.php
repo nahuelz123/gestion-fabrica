@@ -59,6 +59,11 @@ class BotActionExecutor
                     'get_suppliers' => $this->executeGetSuppliers($companyId),
                     'compare_max_production' => $this->executeCompareMaxProduction($companyId, $args),
                     'get_recent_productions' => $this->executeGetRecentProductions($companyId, $args),
+                    'cancel_production' => app(ProductionCancellationService::class)->cancel(
+                        $user,
+                        (int) ($args['order_id'] ?? 0),
+                        isset($args['keep_order_id']) && $args['keep_order_id'] !== null ? (int)$args['keep_order_id'] : null
+                    ),
                     'create_product' => $this->executeCreateProduct($companyId, $args),
                     'register_stock' => $this->executeRegisterStock($companyId, $user->id, $args),
                     'adjust_stock' => $this->executeAdjustStock($companyId, $user->id, $args),
