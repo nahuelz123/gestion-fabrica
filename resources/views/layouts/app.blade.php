@@ -37,6 +37,7 @@
             <a href="{{ route('dashboard') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('dashboard') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">🏠 <span class="ml-3">Inicio</span></a>
             @can('manage-stock')
             <a href="{{ route('inventory.index') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('inventory.index') || request()->routeIs('inventory.entry') || request()->routeIs('inventory.exit') || request()->routeIs('inventory.adjust') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">📦 <span class="ml-3">Stock</span></a>
+            <a href="{{ route('inventory.import') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('inventory.import') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">📊 <span class="ml-3">Importar Excel</span></a>
             <a href="{{ route('inventory.movements') }}" class="flex items-center px-3 py-2 text-sm font-medium rounded-lg {{ request()->routeIs('inventory.movements') ? 'bg-red-50 text-red-700' : 'text-gray-600 hover:bg-gray-50' }}">🧾 <span class="ml-3">Movimientos</span></a>
 
             @endcan

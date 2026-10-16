@@ -8,7 +8,7 @@ use App\Models\Product;
 use App\Models\Stock;
 use App\Models\Warehouse;
 use App\Services\StockService;
-use Illuminate\Support\Facades\DB;
+use App\Services\StockRecountService;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Layout;
@@ -65,7 +65,7 @@ class StockManager extends Component
         $this->errorMessage = null;
     }
 
-    public function applyAdjustment(StockService $stockService): void
+    public function applyAdjustment(StockService $stockService, StockRecountService $recountService): void
     {
         Gate::authorize('manage-stock');
         $companyId = auth()->user()->company_id;
@@ -131,29 +131,12 @@ class StockManager extends Component
         }
         try {
             if ($this->adjustMode === 'set') {
-                // A recount must read stock and apply its delta under the same lock.
-                // StockService reuses this product lock inside the transaction.
-                $this->successMessage = DB::transaction(function () use ($companyId, $product, $warehouse, $qty, $stockService, $user) {
-                    Product::where('company_id', $companyId)->whereKey($product->id)
-                        ->lockForUpdate()->firstOrFail();
-
-                    $currentQty = (float) Stock::where('company_id', $companyId)
-                        ->where('product_id', $product->id)->where('warehouse_id', $warehouse->id)
-                        ->sum('quantity');
-                    $diff = $qty - $currentQty;
-                    if (abs($diff) < 0.001) {
-                        return "El stock de {$product->name} en {$warehouse->name} ya estaba en {$qty} u.";
-                    }
-
-                    $stockService->registerMovement([
-                        'company_id' => $companyId, 'product_id' => $product->id, 'warehouse_id' => $warehouse->id,
-                        'type' => $diff > 0 ? MovementType::AdjustmentIn : MovementType::AdjustmentOut,
-                        'quantity_base' => abs($diff), 'user_id' => $user->id, 'channel' => Channel::Web,
-                        'reason' => 'Recuento físico de stock',
-                    ]);
-
-                    return "Listo. {$product->name} quedó en {$qty} u en {$warehouse->name}.";
-                });
+                $delta = $recountService->setAbsolute(
+                    $user, $warehouse->id, $product->id, null, $qty
+                );
+                $this->successMessage = abs($delta) < 0.005
+                    ? "El stock de {$product->name} en {$warehouse->name} ya estaba en {$qty} u."
+                    : "Listo. {$product->name} quedó en {$qty} u en {$warehouse->name}.";
             } else {
                 $type = $this->adjustMode === 'subtract' ? MovementType::AdjustmentOut : MovementType::AdjustmentIn;
                 $lotData = [];
