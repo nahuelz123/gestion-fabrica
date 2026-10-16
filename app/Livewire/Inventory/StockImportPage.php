@@ -2,7 +2,6 @@
 
 namespace App\Livewire\Inventory;
 
-use App\Models\Product;
 use App\Models\StockImport;
 use App\Models\Warehouse;
 use App\Services\StockImportService;
@@ -119,50 +118,10 @@ class StockImportPage extends Component
         $this->previewPage = max(1, $this->previewPage - 1);
     }
 
-    public function downloadTemplate()
+    public function downloadTemplate(\App\Services\StockTemplateExportService $exporter)
     {
         Gate::authorize('manage-stock');
-
-        $this->validate([
-            'warehouseId' => [
-                'required',
-                Rule::exists('warehouses', 'id')
-                    ->where(fn ($query) => $query->where('company_id', auth()->user()->company_id)),
-            ],
-        ]);
-
-        $products = Product::where('company_id', auth()->user()->company_id)
-            ->where('status', 'active')
-            ->with(['stocks' => fn ($query) => $query->where('warehouse_id', (int)$this->warehouseId),
-                'stocks.lot:id,lot_code'])
-            ->orderBy('name')->get();
-
-        return response()->streamDownload(static function () use ($products) {
-            $handle = fopen('php://output', 'w');
-            fwrite($handle, "\xEF\xBB\xBF");
-            fputcsv($handle, ['Código', 'Producto', 'Cantidad', 'Lote', 'Presentación'], ';', '"', '');
-            // Prevent Excel from interpreting user-provided names as spreadsheet formulas.
-            $safe = static fn ($value) => preg_match('/^[\\s]*[=+@-]/u', (string)$value)
-                ? "'" . (string)$value
-                : (string)$value;
-            foreach ($products as $product) {
-                if ($product->requires_lot) {
-                    foreach ($product->stocks as $stock) {
-                        if (!$stock->lot) continue;
-                        fputcsv($handle, [
-                            $safe($product->internal_code), $safe($product->name),
-                            (string)$stock->quantity, $safe($stock->lot->lot_code), '',
-                        ], ';', '"', '');
-                    }
-                } else {
-                    fputcsv($handle, [
-                        $safe($product->internal_code), $safe($product->name),
-                        (string)$product->stocks->sum('quantity'), '', '',
-                    ], ';', '"', '');
-                }
-            }
-            fclose($handle);
-        }, 'recuento-stock-rapi-burguer.csv', ['Content-Type' => 'text/csv; charset=UTF-8']);
+        return $exporter->download(auth()->user(), (int)$this->warehouseId);
     }
 
     public function render()
@@ -173,7 +132,6 @@ class StockImportPage extends Component
                 ->where('user_id', auth()->id())->where('status', 'preview')
                 ->find($this->batchId)
             : null;
-        if (!$batch) $this->batchId = null;
 
         $rows = collect($batch?->rows ?? []);
         return view('livewire.inventory.stock-import-page', [

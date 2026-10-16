@@ -65,6 +65,7 @@ La lectura de XLSX usa extensiones nativas PHP zip y SimpleXML; si faltan, el si
 | StockSpreadsheetReader | Lectura acotada y segura de archivos CSV/XLSX |
 | StockImportService | Resolución de productos, comparación y aplicación de lote completo |
 | StockRecountService | Ajuste absoluto de una posición de stock |
+| StockTemplateExportService | Genera la plantilla CSV con datos actuales y escapado de fórmulas |
 | StockService | Única escritura de movimientos y actualización transaccional de existencias |
 | Production* | Cálculo, órdenes y reversión de producción |
 | BotAgentService / GeminiService / BotAction* | Interpretación, contexto, confirmación y ejecución autorizada |

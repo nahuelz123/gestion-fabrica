@@ -256,6 +256,22 @@ class StockExcelImportTest extends TestCase
         } finally { unlink($file); }
     }
 
+    public function test_csv_template_escapes_product_names_that_excel_would_execute_as_formulas(): void
+    {
+        $d = $this->fixture();
+        $d['bread']->update(['name' => '=SUM(1,1)']);
+
+        $response = app(\App\Services\StockTemplateExportService::class)
+            ->download($d['owner'], $d['warehouse']->id);
+        ob_start();
+        $response->sendContent();
+        $csv = ob_get_clean();
+
+        $this->assertStringContainsString("'=SUM(1,1)", $csv);
+        $this->assertStringContainsString('PAN-XLS', $csv);
+        $this->assertStringContainsString('QUE-XLS', $csv);
+    }
+
     public function test_livewire_rejects_import_without_confirmation(): void
     {
         $d = $this->fixture();
