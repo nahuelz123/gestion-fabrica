@@ -42,6 +42,29 @@ class StockImportService
             ];
         }
 
+        [$resolved, $errors] = $this->resolveRows($user, $fileRows);
+        if ($errors) return ['batch' => null, 'errors' => array_slice($errors, 0, 50)];
+
+        $resolved = $this->withCurrentStock($user, $warehouseId, $resolved);
+
+
+
+        $batch = StockImport::create([
+            'company_id' => $user->company_id, 'warehouse_id' => $warehouseId,
+            'user_id' => $user->id, 'filename' => mb_substr(basename($filename), 0, 255),
+            'sha256' => $checksum, 'status' => 'preview',
+            'row_count' => count($resolved), 'rows' => $resolved,
+        ]);
+        return ['batch' => $batch, 'errors' => []];
+    }
+
+    /**
+     * Validate and resolve the spreadsheet's identifiers, units and lots.
+     *
+     * @return array{0:list<array<string,mixed>>,1:list<string>}
+     */
+    private function resolveRows(User $user, array $fileRows): array
+    {
         $products = Product::where('company_id', $user->company_id)
             ->where('status', 'active')
             ->with('presentations:id,product_id,name,conversion_factor')
@@ -150,8 +173,12 @@ class StockImportService
             ];
         }
 
-        if ($errors) return ['batch' => null, 'errors' => array_slice($errors, 0, 50)];
+        return [$resolved, $errors];
+    }
 
+    /** @param list<array<string,mixed>> $resolved @return list<array<string,mixed>> */
+    private function withCurrentStock(User $user, int $warehouseId, array $resolved): array
+    {
         $ids = array_column($resolved, 'product_id');
         $existing = Stock::where('company_id', $user->company_id)
             ->where('warehouse_id', $warehouseId)
@@ -166,14 +193,7 @@ class StockImportService
             $row['difference'] = round($row['target'] - $current, 2);
         }
         unset($row);
-
-        $batch = StockImport::create([
-            'company_id' => $user->company_id, 'warehouse_id' => $warehouseId,
-            'user_id' => $user->id, 'filename' => mb_substr(basename($filename), 0, 255),
-            'sha256' => $checksum, 'status' => 'preview',
-            'row_count' => count($resolved), 'rows' => $resolved,
-        ]);
-        return ['batch' => $batch, 'errors' => []];
+        return $resolved;
     }
 
     /**
