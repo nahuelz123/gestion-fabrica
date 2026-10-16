@@ -1,59 +1,97 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Rapi Burguer · Gestión de fábrica
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Aplicación de inventario, compras, recetas, producción, máquinas expendedoras y asistente Telegram para Rapi Burguer.
 
-## About Laravel
+Tecnología: Laravel 12, Livewire 4, PHP 8.2+, MySQL y Tailwind/Vite. Aplicación responsive; web y cola de trabajos separadas en Railway.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Módulos y límites
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- Inventario por depósito y lote, movimientos, recuentos e importación Excel.
+- Productos, presentaciones y recetas con conversiones a unidad base.
+- Simulación y registro de producción; cancelaciones auditables de órdenes.
+- Compras y proveedores, máquinas, ventas y Mercado Pago.
+- Bot Telegram/Gemini: consultas de registros reales, contexto y confirmación obligatoria antes de escribir.
+- Roles y permisos por empresa. El dueño administra; encargados gestionan únicamente las funciones autorizadas.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Desarrollo
 
-## Learning Laravel
+Requisitos: PHP, Composer, Node 22 y MySQL; extensiones zip y SimpleXML para XLSX.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+    composer install
+    cp .env.example .env
+    php artisan key:generate
+    # Configurar la base de datos en .env
+    php artisan migrate
+    npm ci
+    npm run build
+    php artisan serve
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+Trabajador de colas, en otro proceso:
 
-## Laravel Sponsors
+    php artisan queue:work --tries=3
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+Las credenciales de Telegram, Gemini, Mercado Pago y MySQL no deben guardarse en GitHub ni en documentación pública.
 
-### Premium Partners
+## Importación y conciliación desde Excel
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+Ingresá desde **Inventario → Importar Excel**.
 
-## Contributing
+1. Elegí el depósito y descargá la plantilla CSV, que abre en Excel con códigos y cantidades existentes.
+2. Editá las cantidades reales contadas, guardando como CSV o XLSX.
+3. Subí la planilla. El sistema no modifica existencias: muestra la cantidad actual, cantidad Excel y diferencia por producto y lote.
+4. Revisá todas las páginas de la comparación y confirmá para aplicar.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Campos admitidos: **Código** (SKU interno), **Producto** (nombre exacto), **Cantidad**, **Lote** y **Presentación**. Se requiere Cantidad y al menos uno de Código, Producto o código de barras. La presentación es opcional y usa el factor de conversión registrado para ese producto.
 
-## Code of Conduct
+### Reglas de seguridad
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+- El archivo representa un **recuento absoluto** del depósito elegido; no una suma de entradas ni una producción nueva.
+- Las filas ausentes **no ponen existencias a cero**. Una fila con cantidad 0 sí deja ese producto/lote a cero.
+- Los productos loteados requieren un lote existente por fila; no se crea un lote nuevo en silencio.
+- No se aceptan productos desconocidos, códigos ambiguos, filas duplicadas, cantidades negativas ni fórmulas en XLSX.
+- Máximo 1000 filas y 4 MB por archivo. Formatos XLSX y CSV; XLS antiguo no.
+- Los ajustes se hacen solo tras confirmación, con movimientos inmutables en el historial.
+- Las diferencias se calculan bajo bloqueo transaccional: si otro usuario cambió stock tras la vista previa, se **rechaza toda la operación** y hay que volver a comparar.
+- Un archivo ya aplicado en ese depósito no puede aplicarse de nuevo sin generar una planilla actualizada.
+- No transforma lotes vencidos ni reemplaza los ingresos de compras, ventas o producción.
 
-## Security Vulnerabilities
+La lectura de XLSX usa extensiones nativas PHP zip y SimpleXML; si faltan, el sistema informa que debe usarse CSV o habilitarlas.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Arquitectura: una responsabilidad por módulo
 
-## License
+| Archivo o capa | Responsabilidad |
+|---|---|
+| Livewire Inventory/StockImportPage | Interfaz, selección del depósito, carga y confirmación |
+| StockSpreadsheetReader | Lectura acotada y segura de archivos CSV/XLSX |
+| StockImportService | Resolución de productos, comparación y aplicación de lote completo |
+| StockRecountService | Ajuste absoluto de una posición de stock |
+| StockService | Única escritura de movimientos y actualización transaccional de existencias |
+| Production* | Cálculo, órdenes y reversión de producción |
+| BotAgentService / GeminiService / BotAction* | Interpretación, contexto, confirmación y ejecución autorizada |
+| Servicios MercadoPago | Cobros, conciliación y eventos externos |
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+El modelo de IA no puede modificar la base de datos por su cuenta: una acción tiene que pasar por autorización, vista previa y servicios de negocio.
+
+## CI y control de calidad
+
+    php artisan test
+    php artisan route:list
+    php artisan view:cache
+    composer audit --locked
+    npm audit --omit=dev --audit-level=high
+    npm run build
+
+GitHub Actions valida sintaxis, dependencias, migraciones MySQL, rutas, vistas, frontend y suite de pruebas para cada PR. No fusionar ni desplegar cambios que fallen CI.
+
+## Lista de verificación previa al alta definitiva
+
+- [ ] Confirmar un **backup automático de MySQL** y probar su restauración en entorno aislado; el volumen persistente no es un backup.
+- [ ] Verificar variables de seguridad, HTTPS, webhooks, tokens y APP_DEBUG=false.
+- [ ] Revisar Railway: aplicación web, trabajador de colas y base MySQL online, sin fallos ni colas bloqueadas.
+- [ ] Probar operaciones reales con lotes, vencimientos, producción, devoluciones, permisos de dueño y encargado.
+- [ ] Probar un cobro y reembolso controlados en Mercado Pago, y reconciliar webhooks.
+- [ ] Probar preguntas ambiguas, confirmaciones y correcciones de producción en Telegram.
+- [ ] Probar importación de un Excel real: comparar, confirmar, auditar movimientos y comprobar bloqueo de archivo repetido.
+- [ ] Probar en celular, tablet y escritorio con usuarios auténticos.
+
+**Los tests automatizados no sustituyen las comprobaciones operativas en producción.** Antes de una reestructuración profunda del bot o pagos, mantener PRs pequeños, tests de regresión y mecanismos de rollback.
