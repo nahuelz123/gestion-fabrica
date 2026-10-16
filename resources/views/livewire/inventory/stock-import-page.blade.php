@@ -104,8 +104,14 @@
                     </tbody>
                 </table>
             </div>
-            @if($batch->row_count > 100)
-                <p class="text-xs text-gray-500">Mostrando las primeras 100 filas. Al confirmar se procesarán las {{ $batch->row_count }} filas validadas.</p>
+            @if($batch->row_count > 50)
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <p class="text-xs text-gray-600">Página {{ $previewPage }} de {{ (int) ceil($batch->row_count / 50) }} · Las {{ $batch->row_count }} filas se incluirán al confirmar.</p>
+                    <div class="flex gap-2">
+                        <button type="button" wire:click="previousPreviewPage" @disabled($previewPage <= 1) class="min-h-11 rounded-lg border px-4 py-2 text-sm disabled:opacity-40">Anterior</button>
+                        <button type="button" wire:click="nextPreviewPage" @disabled($previewPage >= ceil($batch->row_count / 50)) class="min-h-11 rounded-lg border px-4 py-2 text-sm disabled:opacity-40">Siguiente</button>
+                    </div>
+                </div>
             @endif
 
             <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">

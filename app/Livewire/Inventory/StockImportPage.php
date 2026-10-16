@@ -21,6 +21,7 @@ class StockImportPage extends Component
     public $spreadsheet = null;
     public string $warehouseId = '';
     public ?int $batchId = null;
+    public int $previewPage = 1;
     public bool $confirmed = false;
     public array $validationErrors = [];
     public ?string $message = null;
@@ -36,6 +37,7 @@ class StockImportPage extends Component
     public function updatedWarehouseId(): void
     {
         $this->batchId = null;
+        $this->previewPage = 1;
         $this->confirmed = false;
         $this->validationErrors = [];
         $this->message = null;
@@ -47,6 +49,7 @@ class StockImportPage extends Component
         Gate::authorize('manage-stock');
         $this->reset(['message', 'error', 'batchId', 'validationErrors']);
         $this->confirmed = false;
+        $this->previewPage = 1;
 
         $this->validate([
             'warehouseId' => [
@@ -104,9 +107,29 @@ class StockImportPage extends Component
         }
     }
 
+    public function nextPreviewPage(): void
+    {
+        Gate::authorize('manage-stock');
+        $this->previewPage = min(20, $this->previewPage + 1);
+    }
+
+    public function previousPreviewPage(): void
+    {
+        Gate::authorize('manage-stock');
+        $this->previewPage = max(1, $this->previewPage - 1);
+    }
+
     public function downloadTemplate()
     {
         Gate::authorize('manage-stock');
+
+        $this->validate([
+            'warehouseId' => [
+                'required',
+                Rule::exists('warehouses', 'id')
+                    ->where(fn ($query) => $query->where('company_id', auth()->user()->company_id)),
+            ],
+        ]);
 
         $products = Product::where('company_id', auth()->user()->company_id)
             ->where('status', 'active')
@@ -118,18 +141,22 @@ class StockImportPage extends Component
             $handle = fopen('php://output', 'w');
             fwrite($handle, "\xEF\xBB\xBF");
             fputcsv($handle, ['Código', 'Producto', 'Cantidad', 'Lote', 'Presentación'], ';', '"', '');
+            // Prevent Excel from interpreting user-provided names as spreadsheet formulas.
+            $safe = static fn ($value) => preg_match('/^[\\s]*[=+@-]/u', (string)$value)
+                ? "'" . (string)$value
+                : (string)$value;
             foreach ($products as $product) {
                 if ($product->requires_lot) {
                     foreach ($product->stocks as $stock) {
                         if (!$stock->lot) continue;
                         fputcsv($handle, [
-                            $product->internal_code, $product->name,
-                            (string)$stock->quantity, $stock->lot->lot_code, '',
+                            $safe($product->internal_code), $safe($product->name),
+                            (string)$stock->quantity, $safe($stock->lot->lot_code), '',
                         ], ';', '"', '');
                     }
                 } else {
                     fputcsv($handle, [
-                        $product->internal_code, $product->name,
+                        $safe($product->internal_code), $safe($product->name),
                         (string)$product->stocks->sum('quantity'), '', '',
                     ], ';', '"', '');
                 }
@@ -150,10 +177,11 @@ class StockImportPage extends Component
 
         $rows = collect($batch?->rows ?? []);
         return view('livewire.inventory.stock-import-page', [
+            'previewPage' => max(1, min(20, $this->previewPage)),
             'warehouses' => Warehouse::where('company_id', auth()->user()->company_id)
                 ->orderBy('name')->get(['id', 'name']),
             'batch' => $batch,
-            'previewRows' => $rows->take(100),
+            'previewRows' => $rows->forPage(max(1, min(20, $this->previewPage)), 50),
             'totalChanged' => $rows->filter(fn ($row) => abs((float)$row['difference']) >= 0.005)->count(),
             'totalIncreased' => $rows->filter(fn ($row) => (float)$row['difference'] >= 0.005)->count(),
             'totalDecreased' => $rows->filter(fn ($row) => (float)$row['difference'] <= -0.005)->count(),

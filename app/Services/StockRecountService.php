@@ -6,6 +6,8 @@ use App\Enums\Channel;
 use App\Enums\MovementType;
 use App\Models\Product;
 use App\Models\Stock;
+use App\Models\StockLot;
+use App\Models\Warehouse;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -38,6 +40,13 @@ class StockRecountService
                 ->where('status', 'active')->whereKey($productId)->lockForUpdate()->firstOrFail();
             if ((bool)$product->requires_lot !== ($lotId !== null)) {
                 throw new InvalidArgumentException('Para productos loteados hay que indicar un lote existente.');
+            }
+            if (!Warehouse::where('company_id', $user->company_id)->whereKey($warehouseId)->exists()) {
+                throw new InvalidArgumentException('El depósito no pertenece a esta empresa.');
+            }
+            if ($lotId !== null && !StockLot::where('company_id', $user->company_id)
+                ->where('product_id', $productId)->whereKey($lotId)->exists()) {
+                throw new InvalidArgumentException('El lote indicado no corresponde a este producto.');
             }
             $current = (float) Stock::where('company_id', $user->company_id)
                 ->where('product_id', $productId)->where('warehouse_id', $warehouseId)
