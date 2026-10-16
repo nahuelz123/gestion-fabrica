@@ -25,6 +25,14 @@ class BotActionPreviewService
             return $this->previewSingleStockChange($user->company_id, $args, 'establecer');
         }
 
+        if ($name === 'cancel_production') {
+            return app(ProductionCancellationService::class)->preview(
+                $user,
+                (int) ($args['order_id'] ?? 0),
+                isset($args['keep_order_id']) && $args['keep_order_id'] !== null ? (int)$args['keep_order_id'] : null
+            )['message'];
+        }
+
         if ($name === 'register_production') {
             $product = $args['product_name'] ?? 'el producto indicado';
             $carros = (float) ($args['carros'] ?? 0);

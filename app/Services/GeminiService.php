@@ -99,13 +99,14 @@ Reglas:
 18. Resumen de la fábrica => get_business_summary. Ventas => get_sales_summary. Compras => get_purchases_summary. Proveedores => get_suppliers. Hoy equivale a days=1, una semana a days=7, un mes a days=30 (por defecto).
 19. Entradas y salidas recientes => get_stock_movements. Vencimientos => get_expiring_products. Stock insuficiente => get_low_stock. Catálogo/inventario total => get_stock con product_name=all.
 19.b. Si preguntan "cuántos carritos de bacon y cuántos de cheddar puedo hacer", consultá ambas variedades con compare_max_production y product_names=["bacon","cheddar"]. Son capacidades individuales, no una producción conjunta. Para listar órdenes confirmadas usá get_recent_productions.
-19.c. "En vez de un carro hicimos medio", "me equivoqué en lo que registramos", "al final solo hicimos..." son CORRECCIONES de órdenes ya confirmadas, no instrucciones de fabricar nuevamente. Nunca propongas register_production para cambiar una orden existente: ofrecé revisar las órdenes anteriores y solicitá el identificador antes de conciliar stock.
+19.c. Si el usuario pide «conservar la orden #2 y anular la #1», corresponde cancel_production con order_id=1 y keep_order_id=2, siempre con vista previa y confirmación explícita. Nunca canceles una orden sin un número de orden claro ni interpretes una pregunta como un «sí».
+19.d. "En vez de un carro hicimos medio", "me equivoqué en lo que registramos", "al final solo hicimos..." son CORRECCIONES de órdenes ya confirmadas, no instrucciones de fabricar nuevamente. Nunca propongas register_production para cambiar una orden existente: ofrecé revisar las órdenes anteriores y solicitá el identificador antes de conciliar stock.
 20. Si hay una acción pendiente y dicen 'me equivoqué, eran 25' o 'en realidad 25', corresponde corregir la acción, mostrarla de nuevo y pedir confirmación. Nunca ejecutar un cambio con un mensaje ambiguo.
 21. El dueño puede consultar compras, proveedores y ventas; el encargado sólo inventario y producción. Laravel verifica estos permisos.
 22. No prometas acciones que no estén implementadas. Si no es posible consultar algo desde el bot, aclaralo sin inventar resultados.
 
 Acciones permitidas exclusivamente:
-create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production, compare_max_production, get_recent_productions, get_sales_summary, get_purchases_summary, get_business_summary, get_suppliers, unknown.
+create_product, update_product, register_stock, adjust_stock, set_stock, add_stock, remove_stock, register_production, get_stock, get_low_stock, get_expiring_products, get_stock_movements, create_recipe, update_recipe, get_recipe, calculate_production, check_production, get_max_production, get_missing_inputs, plan_production, compare_max_production, get_recent_productions, cancel_production, get_sales_summary, get_purchases_summary, get_business_summary, get_suppliers, unknown.
 PROMPT;
     }
 
@@ -119,7 +120,7 @@ PROMPT;
             'action'=>['name'=>'string|null','arguments'=>[
                 'name'=>'string|null','new_name'=>'string|null','product_name'=>'string|null','type'=>'string|null','presentation_name'=>'string|null','barcode'=>'string|null',
                 'quantity'=>'number|null','yield_quantity'=>'number|null','min_stock'=>'number|null','shelf_life_days'=>'number|null','requires_lot'=>'boolean|null','requires_expiration'=>'boolean|null','notes'=>'string|null',
-                'product_names'=>['string'],'carros'=>'number|null','bandejas'=>'number|null','days'=>'number|null','limit'=>'number|null','items'=>[$productItem],'production_items'=>[$productItem],'actual_consumptions'=>[$productItem],'hypothetical_stock_additions'=>[$productItem],
+                'order_id'=>'number|null','keep_order_id'=>'number|null','product_names'=>['string'],'carros'=>'number|null','bandejas'=>'number|null','days'=>'number|null','limit'=>'number|null','items'=>[$productItem],'production_items'=>[$productItem],'actual_consumptions'=>[$productItem],'hypothetical_stock_additions'=>[$productItem],
             ]],
             'missing'=>['string'],'requires_confirmation'=>'boolean','confidence'=>'number',
         ];
@@ -127,7 +128,7 @@ PROMPT;
 
     private function validateAndFormatResponse(array $parsed): array
     {
-        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','compare_max_production','get_recent_productions','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','unknown'];
+        $valid=['create_product','update_product','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','get_stock','get_low_stock','get_expiring_products','get_stock_movements','create_recipe','update_recipe','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','compare_max_production','get_recent_productions','cancel_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','unknown'];
         $intent=in_array($parsed['intent'] ?? '', $valid,true) ? $parsed['intent'] : 'unknown';
         $action=null;
         if (isset($parsed['action']) && is_array($parsed['action'])) {

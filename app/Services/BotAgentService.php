@@ -51,6 +51,30 @@ class BotAgentService
             }
         }
 
+        // Referencias explícitas a órdenes: nunca confundir una anulación con fabricar otra vez.
+        // Una pregunta también genera una vista previa, NO ejecuta movimientos.
+        if (preg_match('/\b(?:anular|anul[aá]|anulamos|cancelar|cancel[aá]|revertir|revert[ií])\s+(?:la\s+|el\s+)?(?:orden\s*)?#\s*(\d+)\b/iu', $textNorm, $cancelMatch)
+            && !preg_match('/\bno\s+(?:(?:quiero|debemos|vamos\s+a|hay\s+que)\s+)?(?:anular|cancelar|revertir)\b/iu', $textNorm)) {
+            $orderId = (int)$cancelMatch[1];
+            $keepId = null;
+            if (preg_match('/\b(?:conservar|mantener|dejar)\s+(?:la\s+|el\s+)?(?:orden\s*)?#\s*(\d+)\b/iu', $textNorm, $keepMatch)) {
+                $keepId = (int)$keepMatch[1];
+            }
+            $action = ['name' => 'cancel_production', 'arguments' => ['order_id' => $orderId, 'keep_order_id' => $keepId]];
+            $preview = app(ProductionCancellationService::class)->preview($user, $orderId, $keepId);
+            if ($preview['success']) {
+                $context['status'] = 'ready_for_confirmation';
+                $context['pending_action'] = $action;
+            } else {
+                $context['status'] = 'idle';
+                $context['pending_action'] = null;
+            }
+            $context = $this->addRecentMessage($context, 'assistant', $preview['message']);
+            $this->saveContext($conversation, $context);
+            $this->telegramService->sendMessage($chatId, $preview['message']);
+            return;
+        }
+
         // Una aclaración sobre producción ya registrada nunca puede crear otra orden.
         // Las órdenes confirmadas sólo se corrigen mediante una conciliación explícita.
         $correctionReply = $this->completedProductionCorrectionReply($user, $textNorm);
@@ -138,7 +162,7 @@ class BotAgentService
 
         $readActions=['get_stock','get_low_stock','get_expiring_products','get_stock_movements','get_recipe','calculate_production','check_production','get_max_production','get_missing_inputs','plan_production','get_sales_summary','get_purchases_summary','get_business_summary','get_suppliers','compare_max_production','get_recent_productions'];
         $status='idle'; $actionToExecute=null; $actionName=$action['name'] ?? ''; $previewReply=null;
-        $supportedMutations = ['create_product','update_product','create_recipe','update_recipe','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production'];
+        $supportedMutations = ['create_product','update_product','create_recipe','update_recipe','register_stock','adjust_stock','set_stock','add_stock','remove_stock','register_production','cancel_production'];
         if ($action && !in_array($actionName, [...$readActions, ...$supportedMutations], true)) {
             $reply = 'Esa operación todavía no está disponible desde Telegram. Podés gestionarla en la aplicación web.';
             $context['status'] = 'idle';
