@@ -210,6 +210,33 @@ class StockExcelImportTest extends TestCase
         } finally { unlink($path); }
     }
 
+    public function test_xlsx_uses_first_worksheet_defined_in_workbook_relationships(): void
+    {
+        $d = $this->fixture();
+        $path = tempnam(sys_get_temp_dir(), 'excel-sheet-');
+        $zip = new ZipArchive();
+        $this->assertTrue($zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE) === true);
+        $zip->addFromString('xl/workbook.xml',
+            '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' .
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' .
+            '<sheets><sheet name="Recuento" sheetId="7" r:id="rId8"/></sheets></workbook>');
+        $zip->addFromString('xl/_rels/workbook.xml.rels',
+            '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' .
+            '<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" ' .
+            'Target="worksheets/sheet7.xml"/></Relationships>');
+        $zip->addFromString('xl/worksheets/sheet7.xml',
+            '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' .
+            '<row r="1"><c r="A1" t="inlineStr"><is><t>Codigo</t></is></c><c r="B1" t="inlineStr"><is><t>Cantidad</t></is></c></row>' .
+            '<row r="2"><c r="A2" t="inlineStr"><is><t>PAN-XLS</t></is></c><c r="B2"><v>75</v></c></row>' .
+            '</sheetData></worksheet>');
+        $zip->close();
+        try {
+            $result = app(StockImportService::class)->preview($d['owner'], $d['warehouse']->id, $path, 'recuento.xlsx');
+            $this->assertEmpty($result['errors']);
+            $this->assertEquals(-25, $result['batch']->rows[0]['difference']);
+        } finally { unlink($path); }
+    }
+
     public function test_import_service_denies_inactive_user_and_cross_tenant_warehouse(): void
     {
         $d = $this->fixture();

@@ -104,14 +104,15 @@ class StockSpreadsheetReader
         if ($zip->open($path) !== true) throw new InvalidArgumentException('El Excel está dañado o no es un XLSX válido.');
 
         try {
-            $allowed = ['xl/worksheets/sheet1.xml', 'xl/sharedStrings.xml'];
+            $sheetPath = $this->firstWorksheetPath($zip);
+            $allowed = [$sheetPath, 'xl/sharedStrings.xml'];
             foreach ($allowed as $name) {
                 $stat = $zip->statName($name);
                 if ($stat && (int)$stat['size'] > self::MAX_UNCOMPRESSED) {
                     throw new InvalidArgumentException('La hoja Excel contiene demasiados datos.');
                 }
             }
-            $xml = $zip->getFromName('xl/worksheets/sheet1.xml');
+            $xml = $zip->getFromName($sheetPath);
             if ($xml === false) throw new InvalidArgumentException('El Excel no contiene una primera hoja legible.');
 
             $shared = [];
@@ -164,6 +165,45 @@ class StockSpreadsheetReader
         } finally {
             $zip->close();
         }
+    }
+
+    /**
+     * Resolves the first worksheet through workbook relationships, rather than
+     * assuming that a renamed or reordered sheet still uses sheet1.xml.
+     */
+    private function firstWorksheetPath(ZipArchive $zip): string
+    {
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbookXml === false || $relsXml === false) {
+            return 'xl/worksheets/sheet1.xml';
+        }
+
+        $workbook = $this->xml($workbookXml);
+        $rels = $this->xml($relsXml);
+        $firstSheet = ($workbook->xpath('//*[local-name()="sheets"]/*[local-name()="sheet"]') ?: [])[0] ?? null;
+        if ($firstSheet === null) return 'xl/worksheets/sheet1.xml';
+
+        $relation = $firstSheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+        $relationId = trim((string)($relation['id'] ?? ''));
+        if ($relationId === '') return 'xl/worksheets/sheet1.xml';
+
+        foreach ($rels->xpath('//*[local-name()="Relationship"]') ?: [] as $item) {
+            if ((string)$item['Id'] !== $relationId) continue;
+            $target = (string)$item['Target'];
+            if (str_starts_with($target, '/xl/worksheets/')) {
+                $path = ltrim($target, '/');
+            } elseif (str_starts_with($target, 'worksheets/')) {
+                $path = 'xl/' . $target;
+            } else {
+                break;
+            }
+            if (!preg_match('#^xl/worksheets/[a-zA-Z0-9_-]+\.xml$#', $path)) {
+                throw new InvalidArgumentException('La referencia a la hoja de cálculo no es válida.');
+            }
+            return $path;
+        }
+        throw new InvalidArgumentException('El Excel no tiene una hoja de datos accesible.');
     }
 
     private function xml(string $xml): SimpleXMLElement
