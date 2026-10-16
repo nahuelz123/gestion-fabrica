@@ -174,6 +174,8 @@ class StockExcelImportTest extends TestCase
             "codigo;cantidad\nPAN-XLS;2\nPAN-XLS;3\n",
             "codigo;cantidad\nPAN-XLS;2\nNOT-IN-DB;3\n",
             "codigo;cantidad\nPAN-XLS;-1\n",
+            "codigo;cantidad\nPAN-XLS;1,500\n",
+            "codigo;cantidad\nPAN-XLS;1.500\n",
             "codigo;cantidad\nHAM-XLS;12\n",
         ] as $csv) {
             $path = $this->csv($csv);

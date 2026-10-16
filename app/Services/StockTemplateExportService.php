@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Product;
 use App\Models\User;
 use App\Models\Warehouse;
-use Illuminate\Support\Facades\Response;
 use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 

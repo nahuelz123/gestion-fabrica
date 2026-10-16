@@ -13,7 +13,7 @@
     <section class="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
         <h2 class="font-bold">Cómo funciona</h2>
         <p class="mt-1">Elegí el depósito, descargá la plantilla y editá las cantidades reales en Excel. Al subirla, se mostrará la existencia del sistema, la cantidad de la planilla y la diferencia. <strong>Importar no modifica el stock hasta que confirmes.</strong></p>
-        <p class="mt-2">Formatos: .xlsx o .csv; hasta 1000 filas y 4 MB. Las cantidades son unidades base, salvo que indiques una Presentación existente. Cada producto con control por lote debe incluir su código de Lote, que tiene que existir. Los productos ausentes del archivo <strong>no se ponen en cero</strong>.</p>
+        <p class="mt-2">Formatos: .xlsx o .csv; hasta 1000 filas y 4 MB. Las cantidades son unidades base, salvo que indiques una Presentación existente. Cada producto con control por lote debe incluir su código de Lote, que tiene que existir. Escribí 1500 en vez de 1.500 para evitar separadores ambiguos; para decimales usá 1,50. Los productos ausentes del archivo <strong>no se ponen en cero</strong>.</p>
     </section>
 
     <form wire:submit="preview" class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:p-6">

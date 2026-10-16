@@ -263,9 +263,12 @@ class StockImportService
             $thousands = $decimal === ',' ? '.' : ',';
             $text = str_replace($thousands, '', $text);
             $text = str_replace($decimal, '.', $text);
-        } elseif (preg_match('/^\d{1,3}(?:[.,]\d{3})+$/', $text)) {
-            // "1.500" / "1,500" are unambiguously grouped thousands in physical counts.
+        } elseif (preg_match('/^\d{1,3}(?:[.,]\d{3}){2,}$/', $text)) {
+            // Multiple thousands groups are unambiguous, e.g. 1.234.567.
             $text = str_replace([',', '.'], '', $text);
+        } elseif (preg_match('/^\d{1,3}[.,]\d{3}$/', $text)) {
+            // 1,500 / 1.500 may mean 1.5 or 1500. Never guess in inventory.
+            return null;
         } else {
             $text = str_replace(',', '.', $text);
         }
