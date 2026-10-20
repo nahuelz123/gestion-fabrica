@@ -35,6 +35,10 @@
         @endif
 
         <div class="mt-10 text-xs text-red-100">Máquina {{ $machine->code }} · {{ $machine->partner->name }}</div>
+        <footer class="mt-5 flex flex-wrap items-center justify-center gap-4 text-xs text-red-100">
+            <a href="{{ route('legal.privacy') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-white focus-visible:text-white">Privacidad y datos personales</a>
+            <a href="{{ route('legal.cookies') }}" target="_blank" rel="noopener noreferrer" class="underline underline-offset-4 hover:text-white focus-visible:text-white">Cookies</a>
+        </footer>
     </main>
 </body>
 </html>
