@@ -47,7 +47,7 @@ class StockIndex extends Component
                 });
             })
             ->orderBy('products.name')->orderBy('stock.warehouse_id')->select('stock.*')
-            ->paginate(max(10, min($this->perPage, 100)));
+            ->simplePaginate(max(10, min($this->perPage, 100)));
         return view('livewire.inventory.stock-index', compact('stocks'));
     }
 }

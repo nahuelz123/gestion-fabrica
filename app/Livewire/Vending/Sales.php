@@ -36,20 +36,29 @@ class Sales extends Component
 
     public function render()
     {
+        Gate::authorize('owner-only');
         $companyId = auth()->user()->company_id;
         $base = VendingSale::where('company_id', $companyId)
             ->with(['partner', 'machine', 'product'])
-            ->when($this->date_from, fn ($q) => $q->whereDate('sold_at', '>=', $this->date_from))
-            ->when($this->date_to, fn ($q) => $q->whereDate('sold_at', '<=', $this->date_to))
+            ->when($this->date_from, fn ($q) => $q->where('sold_at', '>=', $this->date_from . ' 00:00:00'))
+            ->when($this->date_to, fn ($q) => $q->where('sold_at', '<', \Carbon\Carbon::parse($this->date_to)->addDay()->toDateString() . ' 00:00:00'))
             ->when($this->partner_id, fn ($q) => $q->where('vending_partner_id', $this->partner_id))
             ->when($this->machine_id, fn ($q) => $q->where('vending_machine_id', $this->machine_id));
 
-        $validSales = (clone $base)->whereIn('status', ['approved', 'partially_refunded']);
+        // Single aggregate query rather than five round trips for every page refresh.
+        $totals = (clone $base)->withoutEagerLoads()
+            ->whereIn('status', ['approved', 'partially_refunded'])
+            ->selectRaw('COUNT(*) AS sales_count')
+            ->selectRaw('COUNT(DISTINCT vending_partner_id) AS partners_count')
+            ->selectRaw('COUNT(DISTINCT vending_machine_id) AS machines_count')
+            ->selectRaw('COALESCE(SUM(gross_amount), 0) AS gross_total')
+            ->selectRaw('COALESCE(SUM(refunded_amount), 0) AS refunded_total')
+            ->first();
         $summary = [
-            'sales' => (clone $validSales)->count(),
-            'partners' => (clone $validSales)->distinct('vending_partner_id')->count('vending_partner_id'),
-            'machines' => (clone $validSales)->distinct('vending_machine_id')->count('vending_machine_id'),
-            'amount' => max(0, (float) (clone $validSales)->sum('gross_amount') - (float) (clone $validSales)->sum('refunded_amount')),
+            'sales' => (int) $totals->sales_count,
+            'partners' => (int) $totals->partners_count,
+            'machines' => (int) $totals->machines_count,
+            'amount' => max(0, (float) $totals->gross_total - (float) $totals->refunded_total),
         ];
 
         $sales = $base->latest('sold_at')->paginate(50);
