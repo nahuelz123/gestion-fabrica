@@ -47,9 +47,9 @@ class StockMovements extends Component
             ->when($this->type !== '', fn ($q) => $q->where('type', $this->type))
             ->when($this->channel !== '', fn ($q) => $q->where('channel', $this->channel))
             ->when($this->warehouse_id !== '', fn ($q) => $q->where('warehouse_id', $this->warehouse_id))
-            ->when($this->date_from !== '', fn ($q) => $q->whereDate('created_at', '>=', $this->date_from))
-            ->when($this->date_to !== '', fn ($q) => $q->whereDate('created_at', '<=', $this->date_to))
-            ->latest('created_at')->paginate(max(10, min($this->perPage, 100)));
+            ->when($this->date_from !== '', fn ($q) => $q->where('created_at', '>=', $this->date_from . ' 00:00:00'))
+            ->when($this->date_to !== '', fn ($q) => $q->where('created_at', '<', \Carbon\Carbon::parse($this->date_to)->addDay()->toDateString() . ' 00:00:00'))
+            ->latest('created_at')->simplePaginate(max(10, min($this->perPage, 100)));
         return view('livewire.inventory.stock-movements', [
             'movements' => $movements,
             'warehouses' => Warehouse::where('company_id', $companyId)->orderBy('name')->get(['id','name']),
